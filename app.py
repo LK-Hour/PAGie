@@ -24,6 +24,24 @@ from rag_pipeline import get_db_stats, query_pagie
 
 load_dotenv()
 
+
+def _to_display_text(value) -> str:
+    """Converts mixed model payloads into clean text for Streamlit markdown."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, dict) and item.get("text"):
+                parts.append(str(item["text"]))
+            elif hasattr(item, "text") and getattr(item, "text"):
+                parts.append(str(getattr(item, "text")))
+        if parts:
+            return "\n\n".join(parts)
+    return str(value)
+
 # ---------------------------------------------------------------------------
 # Page Configuration — must be the FIRST Streamlit call in the script.
 # ---------------------------------------------------------------------------
@@ -112,7 +130,7 @@ with st.sidebar:
     # --- Action Buttons ---
     st.markdown("### ⚙️ Actions")
 
-    if st.button("🔄 Sync Data Sources", use_container_width=True, help="Fetch latest files from Google Drive & Notion"):
+    if st.button("🔄 Sync Data Sources", width="stretch", help="Fetch latest files from Google Drive & Notion"):
         with st.spinner("Connecting to Google Drive & Notion..."):
             try:
                 from sync_data import run_sync
@@ -122,7 +140,7 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"❌ Sync failed: {e}")
 
-    if st.button("🔬 Rebuild Knowledge Base", use_container_width=True, help="Re-process documents: chunk → IQR filter → embed → store"):
+    if st.button("🔬 Rebuild Knowledge Base", width="stretch", help="Re-process documents: chunk → IQR filter → embed → store"):
         with st.spinner("Running Data Science pipeline (this may take a minute)..."):
             try:
                 from data_science_eda import run_pipeline
@@ -135,7 +153,7 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"❌ Pipeline failed: {e}")
 
-    if st.button("🗑️ Clear Chat History", use_container_width=True):
+    if st.button("🗑️ Clear Chat History", width="stretch"):
         st.session_state.messages = []
         st.rerun()
 
@@ -147,7 +165,7 @@ with st.sidebar:
     if eda_path.exists():
         st.image(
             str(eda_path),
-            use_container_width=True,
+            width="stretch",
             caption="Latest IQR filtering & data distribution analysis",
         )
         # Show when the EDA was last generated
@@ -179,11 +197,11 @@ if "messages" not in st.session_state:
         {
             "role": "assistant",
             "content": (
-                "👋 Hi! I'm **PAGie**, your AI Second Brain.\n\n"
-                "I have access to everything in your connected Google Drive folder "
-                "and Notion database. Ask me about deadlines, lecture notes, project "
-                "details — anything you've stored there.\n\n"
-                "*What would you like to know today?*"
+                "👋 Hi! I’m **PAGie**, speaking as your knowledge-backed version of you.\n\n"
+                "When I answer, I’ll respond in **first person** using your synced notes, "
+                "documents, and project materials. Ask me things like interview questions, "
+                "project updates, academic background, or anything stored in your knowledge base.\n\n"
+                "*What would you like me to answer as you today?*"
             ),
             "sources": [],
         }
@@ -224,7 +242,9 @@ if prompt := st.chat_input(
         with st.spinner("Searching your knowledge base..."):
             result = query_pagie(prompt)
 
-        st.markdown(result["answer"])
+        answer_text = _to_display_text(result.get("answer", ""))
+
+        st.markdown(answer_text)
 
         # Render source badges for the new response.
         if result.get("sources"):
@@ -240,6 +260,6 @@ if prompt := st.chat_input(
     # 3. Persist the assistant response to session history.
     st.session_state.messages.append({
         "role": "assistant",
-        "content": result["answer"],
+        "content": answer_text,
         "sources": result.get("sources", []),
     })

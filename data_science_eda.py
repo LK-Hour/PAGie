@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Load API keys from .env — required for embedding model.
@@ -50,6 +50,12 @@ CHUNK_OVERLAP = 50
 # File that saves embedding progress so the pipeline can resume after
 # a daily quota reset without re-embedding already processed batches.
 CHECKPOINT_FILE = DATA_DIR / "embed_checkpoint.json"
+
+# Local sentence-transformers model used for embeddings.
+# Runs entirely on CPU — no API key, no quota, no cost.
+# all-MiniLM-L6-v2: 80 MB model, 384-dim vectors, excellent for RAG retrieval.
+# Downloaded automatically on first run and cached in ~/.cache/huggingface/
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 # Ensure output directories exist.
 ASSETS_DIR.mkdir(exist_ok=True)
@@ -192,63 +198,77 @@ def build_dataframe(chunks: list) -> pd.DataFrame:
 
     df = pd.DataFrame(records)
     logger.info(f"DataFrame created — Shape: {df.shape}")
-    logger.info(f"\n--- Descriptive Statistics (before IQR) ---\n{df[['word_count', 'char_count']].describe().to_string()}")
+    logger.info(f"\n--- Descriptive Statistics (before filtering) ---\n{df[['word_count', 'char_count']].describe().to_string()}")
     return df
 
 
 # ===========================================================================
-# STEP 4 — IQR FILTER: Remove statistical outliers
+# STEP 4 — QUALITY FILTER: Remove semantically empty chunks
 # ===========================================================================
+
+# Minimum number of words a chunk must contain to be considered meaningful.
+# Chunks below this threshold are typically parsing artifacts: page numbers,
+# lone headers, watermarks, or stray characters — not real knowledge.
+# No upper bound is applied: long chunks still carry valid, complete information
+# and the embedding model handles them correctly within its token limit.
+MIN_WORD_COUNT = 5
+
 
 def apply_iqr_filter(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Applies the Interquartile Range (IQR) method to remove word-count outliers.
+    Removes semantically empty chunks using a minimum word-count threshold.
 
-    The IQR is a non-parametric, robust statistical method for detecting
-    outliers that does not assume a normal distribution — ideal for
-    text data which is typically right-skewed.
+    Design rationale
+    ----------------
+    IQR (Interquartile Range) is a classic statistical outlier method designed
+    for numerical measurements such as sensor readings. Applied naively to
+    text, it introduces content bias:
 
-    Method:
-      Q1    = 25th percentile of word_count
-      Q3    = 75th percentile of word_count
-      IQR   = Q3 - Q1  (the "middle 50%" spread)
+      • The lower fence (Q1 − 1.5×IQR) becomes negative for this dataset
+        (≈ −56 words), so it never actually filters anything — yet it gives
+        a false impression of statistical rigour.
+      • The upper fence removes long chunks that are semantically valid and
+        would otherwise provide valuable context to the LLM.
+      • IQR treats length as a proxy for quality, which is incorrect:
+        a 3-word chunk "CADT, Phnom Penh" is short but factually critical,
+        while a 50-word chunk of repeated boilerplate is useless.
 
-      Lower Fence = Q1 - 1.5 × IQR  → chunks below this are too short
-                                        (e.g., page numbers, stray headers)
-      Upper Fence = Q3 + 1.5 × IQR  → chunks above this are too long
-                                        (unbroken walls of text with no focus)
+    The chosen approach instead uses a single, domain-justified threshold:
+      word_count >= MIN_WORD_COUNT (default: 5)
 
-    Why this matters for RAG:
-      Short chunks lack sufficient context to be meaningful.
-      Long chunks dilute the specific information the LLM needs.
-      IQR filtering ensures every chunk fed to Gemini is optimally sized.
+    This removes genuine artifacts (page numbers, stray OCR characters,
+    empty table cells) without discarding any real content, regardless of
+    how long or short it is. It is unbiased with respect to chunk length.
+
+    IQR statistics are still *computed and logged* below for transparency
+    and to provide the EDA visualisation with distribution context.
 
     Args:
         df: DataFrame with a 'word_count' column.
 
     Returns:
-        A filtered DataFrame containing only inlier chunks.
+        A filtered DataFrame retaining all chunks with >= MIN_WORD_COUNT words.
     """
+    # --- Still compute IQR statistics for EDA reporting purposes ---
     Q1 = df["word_count"].quantile(0.25)
     Q3 = df["word_count"].quantile(0.75)
     IQR = Q3 - Q1
-    lower_fence = Q1 - 1.5 * IQR
-    upper_fence = Q3 + 1.5 * IQR
+    iqr_lower = Q1 - 1.5 * IQR
+    iqr_upper = Q3 + 1.5 * IQR
 
-    logger.info("\n--- IQR Outlier Analysis ---")
-    logger.info(f"  Q1  (25th percentile) : {Q1:.1f} words")
-    logger.info(f"  Q3  (75th percentile) : {Q3:.1f} words")
-    logger.info(f"  IQR                   : {IQR:.1f} words")
-    logger.info(f"  Lower Fence           : {lower_fence:.1f} words  (minimum quality threshold)")
-    logger.info(f"  Upper Fence           : {upper_fence:.1f} words  (maximum quality threshold)")
+    logger.info("\n--- Chunk Quality Filter Analysis ---")
+    logger.info(f"  Distribution Q1       : {Q1:.1f} words")
+    logger.info(f"  Distribution Q3       : {Q3:.1f} words")
+    logger.info(f"  IQR (for reference)   : {IQR:.1f} words")
+    logger.info(f"  IQR lower fence       : {iqr_lower:.1f} words  (negative → never triggers)")
+    logger.info(f"  IQR upper fence       : {iqr_upper:.1f} words  (not applied — biased)")
+    logger.info(f"  Applied threshold     : word_count >= {MIN_WORD_COUNT} (semantic minimum)")
 
-    # Apply the IQR bounds to retain only the statistically 'normal' chunks.
-    df_filtered = df[
-        (df["word_count"] >= lower_fence) & (df["word_count"] <= upper_fence)
-    ].copy()
+    # Apply the semantic minimum threshold — no upper bound.
+    df_filtered = df[df["word_count"] >= MIN_WORD_COUNT].copy()
 
     removed = len(df) - len(df_filtered)
-    logger.info(f"  Outliers removed      : {removed} chunks ({removed / len(df) * 100:.1f}%)")
+    logger.info(f"  Artifacts removed     : {removed} chunks ({removed / len(df) * 100:.1f}%)")
     logger.info(f"  Clean chunks retained : {len(df_filtered)} chunks")
 
     return df_filtered
@@ -264,8 +284,8 @@ def generate_eda_plots(df_raw: pd.DataFrame, df_filtered: pd.DataFrame):
 
     The four charts fulfil the exact EDA requirements from the project proposal:
 
-      [Top-Left]  Histogram  — Chunk word count distribution, before vs. after IQR.
-                               Shows how IQR filtering tightens the distribution.
+      [Top-Left]  Histogram  — Chunk word count distribution, before vs. after quality filter.
+                               Shows the applied minimum threshold and post-filter mean.
 
       [Top-Right] Boxplot    — Comparing word count spread between Notion and Google Drive.
                                Expected insight: Notion pages are shorter and more structured.
@@ -273,8 +293,9 @@ def generate_eda_plots(df_raw: pd.DataFrame, df_filtered: pd.DataFrame):
       [Bot-Left]  Pie Chart  — Proportion of cleaned knowledge base by source platform.
                                Shows which platform contributes more data.
 
-      [Bot-Right] Scatter    — IQR outlier detection map. Red × marks = removed chunks.
-                               Visually demonstrates where outliers were in the dataset.
+      [Bot-Right] Scatter    — Quality filter map. Red × = removed artifacts (< 5 words).
+                               IQR fences shown as reference lines to illustrate why the
+                               data-driven approach is unsuitable for this dataset.
 
     Args:
         df_raw      : DataFrame before IQR filtering (all chunks).
@@ -290,17 +311,19 @@ def generate_eda_plots(df_raw: pd.DataFrame, df_filtered: pd.DataFrame):
     )
 
     # -----------------------------------------------------------------------
-    # Plot 1 (Top-Left): Histogram — Before vs. After IQR
+    # Plot 1 (Top-Left): Histogram — Before vs. After quality filter
     # -----------------------------------------------------------------------
     ax1 = axes[0, 0]
-    ax1.hist(df_raw["word_count"], bins=30, alpha=0.45, color="#4C72B0", label="Before IQR")
-    ax1.hist(df_filtered["word_count"], bins=30, alpha=0.75, color="#55A868", label="After IQR")
-    ax1.set_title("Chunk Word Count Distribution\n(Before vs. After IQR Filtering)")
+    ax1.hist(df_raw["word_count"], bins=30, alpha=0.45, color="#4C72B0", label="Before filtering")
+    ax1.hist(df_filtered["word_count"], bins=30, alpha=0.75, color="#55A868", label="After filtering")
+    ax1.set_title("Chunk Word Count Distribution\n(Before vs. After Quality Filtering)")
     ax1.set_xlabel("Word Count per Chunk")
     ax1.set_ylabel("Number of Chunks")
-    ax1.legend()
+    ax1.axvline(MIN_WORD_COUNT, color="orange", linestyle="--", linewidth=1.8,
+                label=f"Min threshold ({MIN_WORD_COUNT} words)")
     ax1.axvline(df_filtered["word_count"].mean(), color="darkgreen", linestyle="--",
-                linewidth=1.5, label=f'Mean: {df_filtered["word_count"].mean():.0f}')
+                linewidth=1.5, label=f'Mean after: {df_filtered["word_count"].mean():.0f} words')
+    ax1.legend(fontsize=9)
 
     # -----------------------------------------------------------------------
     # Plot 2 (Top-Right): Boxplot — Word count by source platform
@@ -349,39 +372,45 @@ def generate_eda_plots(df_raw: pd.DataFrame, df_filtered: pd.DataFrame):
     ax3.set_title("Knowledge Base Composition\nby Source Platform")
 
     # -----------------------------------------------------------------------
-    # Plot 4 (Bot-Right): Scatter — IQR outlier detection map
+    # Plot 4 (Bot-Right): Scatter — Chunk quality filter map
+    # Shows which chunks were removed (below MIN_WORD_COUNT) vs. kept,
+    # and overlays the IQR fences as reference lines to illustrate why
+    # the data-driven IQR approach is not suitable here (lower fence is
+    # negative, meaning it would never filter anything meaningful).
     # -----------------------------------------------------------------------
     ax4 = axes[1, 1]
+
     Q1 = df_raw["word_count"].quantile(0.25)
     Q3 = df_raw["word_count"].quantile(0.75)
     IQR_val = Q3 - Q1
-    lower_fence = Q1 - 1.5 * IQR_val
-    upper_fence = Q3 + 1.5 * IQR_val
+    iqr_lower = Q1 - 1.5 * IQR_val
+    iqr_upper = Q3 + 1.5 * IQR_val
 
-    is_outlier = (
-        (df_raw["word_count"] < lower_fence) | (df_raw["word_count"] > upper_fence)
-    )
+    is_removed = df_raw["word_count"] < MIN_WORD_COUNT
 
-    # Plot inliers (kept) and outliers (removed) with distinct styles.
+    # Plot kept and removed chunks with distinct styles.
     ax4.scatter(
-        df_raw.index[~is_outlier],
-        df_raw.loc[~is_outlier, "word_count"],
-        alpha=0.4, s=12, color="#55A868", label="Kept",
+        df_raw.index[~is_removed],
+        df_raw.loc[~is_removed, "word_count"],
+        alpha=0.35, s=10, color="#55A868", label="Kept",
     )
     ax4.scatter(
-        df_raw.index[is_outlier],
-        df_raw.loc[is_outlier, "word_count"],
-        alpha=0.9, s=30, color="#C44E52", label="Removed (Outlier)", marker="x",
+        df_raw.index[is_removed],
+        df_raw.loc[is_removed, "word_count"],
+        alpha=0.9, s=35, color="#C44E52", label=f"Removed (< {MIN_WORD_COUNT} words)", marker="x",
     )
-    # Draw the IQR fence lines to make the decision boundary visible.
-    ax4.axhline(lower_fence, color="orange", linestyle="--", linewidth=1.8,
-                label=f"Lower Fence ({lower_fence:.0f} words)")
-    ax4.axhline(upper_fence, color="red", linestyle="--", linewidth=1.8,
-                label=f"Upper Fence ({upper_fence:.0f} words)")
-    ax4.set_title("IQR Outlier Detection Map")
+    # Applied threshold line.
+    ax4.axhline(MIN_WORD_COUNT, color="red", linestyle="-", linewidth=2,
+                label=f"Applied threshold ({MIN_WORD_COUNT} words)")
+    # IQR reference lines — shown as dashed to contrast with the applied threshold.
+    ax4.axhline(iqr_upper, color="grey", linestyle="--", linewidth=1.2,
+                label=f"IQR upper fence ({iqr_upper:.0f} words) — not applied")
+    ax4.axhline(iqr_lower, color="lightgrey", linestyle="--", linewidth=1.2,
+                label=f"IQR lower fence ({iqr_lower:.0f} words) — negative, never triggered")
+    ax4.set_title("Chunk Quality Filter Map\n(Semantic Threshold vs. IQR Reference)")
     ax4.set_xlabel("Chunk Index")
     ax4.set_ylabel("Word Count")
-    ax4.legend(fontsize=9)
+    ax4.legend(fontsize=8)
 
     plt.tight_layout()
 
@@ -397,7 +426,7 @@ def generate_eda_plots(df_raw: pd.DataFrame, df_filtered: pd.DataFrame):
 
 def embed_and_store(df_filtered: pd.DataFrame, all_chunks: list) -> Chroma:
     """
-    Embeds IQR-filtered text chunks using Google's embedding model
+    Embeds quality-filtered text chunks using Google's embedding model
     and persists them to the local ChromaDB vector database.
 
     The embedding model converts each text chunk into a high-dimensional
@@ -429,138 +458,47 @@ def embed_and_store(df_filtered: pd.DataFrame, all_chunks: list) -> Chroma:
         clean_docs = [doc for i, doc in enumerate(all_chunks) if i in valid_ids]
         logger.info(f"Embedding {len(clean_docs)} clean chunk(s) into ChromaDB...")
 
-        embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/gemini-embedding-001",
-            google_api_key=os.getenv("GOOGLE_API_KEY"),
+        # Local embeddings — runs on CPU, no API key or quota required.
+        # The model is downloaded once (~80 MB) and cached automatically.
+        embeddings = HuggingFaceEmbeddings(
+            model_name=EMBEDDING_MODEL,
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True},  # Cosine similarity requires normalised vectors.
         )
+        logger.info(f"Using local embedding model: {EMBEDDING_MODEL}")
 
         # ---------------------------------------------------------------------------
-        # Rate-limited batching with checkpoint/resume support.
-        #
-        # The free-tier Gemini API enforces two separate limits:
-        #   • RPM (requests/minute): causes temporary 429s — solved by waiting 65s.
-        #   • RPD (requests/day):    causes permanent 429s until midnight UTC reset.
-        #
-        # We differentiate by checking the error message:
-        #   - Daily quota: message contains "billing" or "check your plan"
-        #   - Per-minute:  all other 429 / RESOURCE_EXHAUSTED errors
-        #
-        # A JSON checkpoint file (CHECKPOINT_FILE) tracks which batch was last
-        # successfully embedded. On the next run the script resumes from that
-        # batch and reuses the existing ChromaDB, so no work is duplicated.
+        # Local batch processing — no API rate limits to worry about.
+        # Batching is still used to manage memory efficiently on CPU.
         # ---------------------------------------------------------------------------
-        BATCH_SIZE = 80          # Chunks per API call (safe under the 100 req/min limit).
-        SLEEP_SECONDS = 0.8      # Pause between batches → ~75 calls/min max.
-        RETRY_WAIT = 65          # Seconds to wait on a per-minute 429 error.
+        BATCH_SIZE = 256         # Larger batches are fine locally (no quota).
+        SLEEP_SECONDS = 0        # No need to pause between batches.
+        RETRY_WAIT = 0           # No retries needed — no network calls.
 
         total = len(clean_docs)
         batches = [clean_docs[i:i + BATCH_SIZE] for i in range(0, total, BATCH_SIZE)]
         total_batches = len(batches)
         logger.info(f"Processing {total_batches} batch(es) of up to {BATCH_SIZE} chunks each.")
 
-        # --- Load checkpoint (if a previous run was interrupted by daily quota) ---
-        start_batch = 0
-        if CHECKPOINT_FILE.exists():
-            try:
-                with open(CHECKPOINT_FILE) as f:
-                    checkpoint = json.load(f)
-                start_batch = checkpoint.get("next_batch", 0)
-                logger.info(
-                    f"📂 Checkpoint found — resuming from batch {start_batch + 1}/{total_batches} "
-                    f"({start_batch * BATCH_SIZE}/{total} chunks already embedded)."
-                )
-            except (json.JSONDecodeError, KeyError):
-                logger.warning("Checkpoint file corrupt — starting from batch 1.")
-                start_batch = 0
-
-        # --- Load existing ChromaDB if resuming, otherwise start fresh ---
+        # --- Build ChromaDB in batches (memory-efficient on CPU) ---
         vector_db = None
-        chroma_db_path = Path(CHROMA_DB_DIR)
-        if start_batch > 0 and chroma_db_path.exists():
-            try:
-                vector_db = Chroma(
-                    persist_directory=CHROMA_DB_DIR,
-                    embedding_function=embeddings,
-                )
-                logger.info("Loaded existing ChromaDB collection for resume.")
-            except Exception as load_err:
-                logger.warning(f"Could not load existing ChromaDB ({load_err}). Starting from batch 1.")
-                start_batch = 0
-                vector_db = None
-
-        # --- Main embedding loop ---
         for batch_num, batch in enumerate(batches, start=1):
-            # Skip batches that were already embedded in a previous run.
-            if batch_num <= start_batch:
-                continue
+            if vector_db is None:
+                # First batch — create the ChromaDB collection from scratch.
+                vector_db = Chroma.from_documents(
+                    documents=batch,
+                    embedding=embeddings,
+                    persist_directory=CHROMA_DB_DIR,
+                )
+            else:
+                # Subsequent batches — append to the existing collection.
+                vector_db.add_documents(batch)
 
-            success = False
-            while not success:
-                try:
-                    if vector_db is None:
-                        # First-ever batch — create the ChromaDB collection from scratch.
-                        vector_db = Chroma.from_documents(
-                            documents=batch,
-                            embedding=embeddings,
-                            persist_directory=CHROMA_DB_DIR,
-                        )
-                    else:
-                        # All subsequent batches — append to the existing collection.
-                        vector_db.add_documents(batch)
-
-                    # Save checkpoint so the next run can resume from here.
-                    with open(CHECKPOINT_FILE, "w") as f:
-                        json.dump({"next_batch": batch_num}, f)
-
-                    embedded_so_far = min(batch_num * BATCH_SIZE, total)
-                    logger.info(
-                        f"  ✅ Batch {batch_num}/{total_batches} embedded "
-                        f"({embedded_so_far}/{total} chunks)"
-                    )
-                    success = True
-
-                except Exception as batch_err:
-                    err_str = str(batch_err)
-                    # Distinguish daily quota exhaustion from per-minute rate limiting.
-                    is_daily_quota = (
-                        "billing" in err_str.lower()
-                        or "check your plan" in err_str.lower()
-                    )
-                    is_rate_limit = (
-                        "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
-                    )
-
-                    if is_daily_quota:
-                        # Daily quota is exhausted — retrying will not help today.
-                        logger.error(
-                            "\n❌ DAILY API QUOTA EXHAUSTED\n"
-                            f"   Successfully embedded {(batch_num - 1) * BATCH_SIZE}/{total} chunks "
-                            f"across {batch_num - 1}/{total_batches} batches.\n"
-                            "   Progress has been saved to the checkpoint file.\n"
-                            "   Re-run this script tomorrow (quota resets at midnight UTC) "
-                            "to continue from where it left off.\n"
-                        )
-                        # Return partial DB — app.py can still query what was indexed.
-                        return vector_db
-                    elif is_rate_limit:
-                        # Per-minute rate limit — pause and retry automatically.
-                        logger.warning(
-                            f"  ⚠️  Per-minute rate limit hit on batch {batch_num}. "
-                            f"Waiting {RETRY_WAIT}s before retrying..."
-                        )
-                        time.sleep(RETRY_WAIT)
-                    else:
-                        # Unknown error — do not retry, raise immediately.
-                        raise
-
-            # Polite pause between successful batches to respect the per-minute quota.
-            if batch_num < total_batches:
-                time.sleep(SLEEP_SECONDS)
-
-        # All batches complete — delete the checkpoint file (no longer needed).
-        if CHECKPOINT_FILE.exists():
-            CHECKPOINT_FILE.unlink()
-            logger.info("🗑️  Checkpoint cleared — all batches complete.")
+            embedded_so_far = min(batch_num * BATCH_SIZE, total)
+            logger.info(
+                f"  ✅ Batch {batch_num}/{total_batches} embedded "
+                f"({embedded_so_far}/{total} chunks)"
+            )
 
         doc_count = len(vector_db.get()["ids"]) if vector_db else 0
         logger.info(f"✅ ChromaDB populated with {doc_count} vectors at '{CHROMA_DB_DIR}'.")
@@ -619,8 +557,8 @@ def run_pipeline():
 
     logger.info("🎉 PAGie Data Science Pipeline complete!")
     logger.info(f"   Total raw chunks     : {len(df_raw)}")
-    logger.info(f"   Chunks after IQR     : {len(df_filtered)}")
-    logger.info(f"   Outliers removed     : {len(df_raw) - len(df_filtered)}")
+    logger.info(f"   Chunks after filter  : {len(df_filtered)}")
+    logger.info(f"   Artifacts removed    : {len(df_raw) - len(df_filtered)}")
     logger.info("   EDA report           : ./assets/eda_report.png")
     logger.info(f"   Vector DB            : {CHROMA_DB_DIR}/")
 
