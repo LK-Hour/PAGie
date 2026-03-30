@@ -61,3 +61,4 @@ Thumbs.db
 credentials.json
 token.json
 service_account.json
+client_secret_*.json

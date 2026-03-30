@@ -23,11 +23,37 @@
 ## 🛠️ Technology Stack
 * **Language:** Python
 * **Orchestration:** LangChain
-* **LLM & Embeddings:** Google AI Studio (Gemini 3.0 / Flash)
+* **LLM (Prod):** Google AI Studio (Gemini)
+* **LLM (Dev):** Local Ollama model (`qwen3.5:2b`)
+* **Embeddings:** Local Sentence-Transformers (`all-MiniLM-L6-v2`)
 * **Vector Database:** ChromaDB
 * **Data Extraction:** Google Drive API, Notion API
 * **Data Science:** Pandas, NumPy, Matplotlib, Seaborn
 * **Frontend UI:** Streamlit
+
+---
+
+## 🚀 Runtime Modes (Dev vs Prod)
+
+PAGie supports two runtime modes via `.env`:
+
+- `APP_MODE=dev` → Local LLM via Ollama (no Gemini rate-limit interruptions during development)
+- `APP_MODE=prod` → Gemini (for final demo/report alignment with project proposal)
+
+### Dev (local LLM)
+```bash
+./ops_run_dev_local.sh
+```
+
+### Prod (Gemini)
+```bash
+./ops_run_prod_gemini.sh
+```
+
+### Backup + Reset noisy DB + Rebuild vectors
+```bash
+./ops_backup_reset_rebuild.sh
+```
 
 ---
 

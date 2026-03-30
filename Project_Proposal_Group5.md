@@ -124,7 +124,7 @@ The model's performance will be evaluated using specialized RAG retrieval metric
 
 * **Execution Latency:** Time taken from user prompt to complete answer generation (Target: \<5 seconds).
 
-
+3
 ### **9\. Discussion / Conclusion**
 
 **1\. Discussion:** We will analyze which features (metadata vs. raw text) were most important for the AI's retrieval success. Insights will include how combining different API sources (Notion \+ Drive) impacted the AI's ability to cross-reference personal data.

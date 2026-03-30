@@ -18,6 +18,7 @@ Usage:
 import json
 import logging
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -41,6 +42,12 @@ load_dotenv()
 DATA_DIR = Path("./data")
 ASSETS_DIR = Path("./assets")
 CHROMA_DB_DIR = "./chroma_db"
+
+# Optional ingestion hygiene controls (comma-separated globs / regex-lite substrings)
+EXCLUDE_SOURCE_PATTERNS = [p.strip().lower() for p in os.getenv("EXCLUDE_SOURCE_PATTERNS", "").split(",") if p.strip()]
+INCLUDE_ONLY_SOURCE_PATTERNS = [p.strip().lower() for p in os.getenv("INCLUDE_ONLY_SOURCE_PATTERNS", "").split(",") if p.strip()]
+MIN_CHARS_PER_DOC = int(os.getenv("MIN_CHARS_PER_DOC", "40"))
+RESET_CHROMA_ON_REBUILD = os.getenv("RESET_CHROMA_ON_REBUILD", "true").lower() == "true"
 
 # Chunk size in characters — 500 chars ≈ 80-100 words, a good RAG context unit.
 # Overlap ensures that context spanning chunk boundaries is not lost.
@@ -75,6 +82,19 @@ logger = logging.getLogger(__name__)
 # STEP 1 — LOAD: Read all raw documents from ./data/
 # ===========================================================================
 
+def _should_keep_source(source: str) -> bool:
+    s = source.lower()
+
+    if INCLUDE_ONLY_SOURCE_PATTERNS:
+        if not any(token in s for token in INCLUDE_ONLY_SOURCE_PATTERNS):
+            return False
+
+    if EXCLUDE_SOURCE_PATTERNS and any(token in s for token in EXCLUDE_SOURCE_PATTERNS):
+        return False
+
+    return True
+
+
 def load_documents() -> list:
     """
     Loads all text and PDF documents from the ./data/ directory tree.
@@ -100,13 +120,19 @@ def load_documents() -> list:
         )
         txt_docs = txt_loader.load()
 
-        # Attach source platform metadata to each document for EDA.
+        # Attach source platform metadata to each document for EDA and apply source filters.
+        kept_txt_docs = []
         for doc in txt_docs:
             source = doc.metadata.get("source", "")
+            if not _should_keep_source(source):
+                continue
+            if len((doc.page_content or "").strip()) < MIN_CHARS_PER_DOC:
+                continue
             doc.metadata["platform"] = "Notion" if "notion" in source.lower() else "Google Drive"
+            kept_txt_docs.append(doc)
 
-        all_docs.extend(txt_docs)
-        logger.info(f"Loaded {len(txt_docs)} text file(s).")
+        all_docs.extend(kept_txt_docs)
+        logger.info(f"Loaded {len(kept_txt_docs)} text file(s) after filtering.")
 
     except Exception as e:
         logger.error(f"Error loading .txt files: {e}")
@@ -118,10 +144,18 @@ def load_documents() -> list:
             try:
                 loader = PyPDFLoader(str(pdf_path))
                 pdf_docs = loader.load()
+                kept_pdf_docs = []
                 for doc in pdf_docs:
+                    source = doc.metadata.get("source", str(pdf_path))
+                    if not _should_keep_source(source):
+                        continue
+                    if len((doc.page_content or "").strip()) < MIN_CHARS_PER_DOC:
+                        continue
                     doc.metadata["platform"] = "Google Drive"
-                all_docs.extend(pdf_docs)
-                logger.info(f"  ✅ Loaded PDF: {pdf_path.name}")
+                    kept_pdf_docs.append(doc)
+                if kept_pdf_docs:
+                    all_docs.extend(kept_pdf_docs)
+                    logger.info(f"  ✅ Loaded PDF: {pdf_path.name} ({len(kept_pdf_docs)} page chunk(s))")
             except Exception as e:
                 logger.error(f"  ❌ Failed to load PDF '{pdf_path.name}': {e}")
 
@@ -457,6 +491,11 @@ def embed_and_store(df_filtered: pd.DataFrame, all_chunks: list) -> Chroma:
         valid_ids = set(df_filtered["chunk_id"].tolist())
         clean_docs = [doc for i, doc in enumerate(all_chunks) if i in valid_ids]
         logger.info(f"Embedding {len(clean_docs)} clean chunk(s) into ChromaDB...")
+
+        # Optional hard reset to avoid duplicate / stale vectors between rebuilds.
+        if RESET_CHROMA_ON_REBUILD and Path(CHROMA_DB_DIR).exists():
+            logger.info("RESET_CHROMA_ON_REBUILD=true → removing previous chroma_db before re-embedding...")
+            shutil.rmtree(CHROMA_DB_DIR, ignore_errors=True)
 
         # Local embeddings — runs on CPU, no API key or quota required.
         # The model is downloaded once (~80 MB) and cached automatically.

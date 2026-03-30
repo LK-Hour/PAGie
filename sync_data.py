@@ -62,6 +62,10 @@ SUPPORTED_MIME_TYPES = [
     "text/plain",                                 # Plain text files
 ]
 
+# Optional: Restrict sync to a specific Google Drive folder (recommended to reduce noisy corpus).
+# If unset, sync scans the entire drive for supported file types.
+GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+
 # Notion Integration Token — obtained from https://www.notion.so/my-integrations
 # Supports both legacy format (secret_...) and new format (ntn_...).
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
@@ -194,7 +198,17 @@ def _list_all_drive_files(service) -> list:
     """
     # Build a MIME type filter — only fetch file types we can process as text.
     mime_filter = " or ".join([f"mimeType='{m}'" for m in SUPPORTED_MIME_TYPES])
-    query = f"trashed=false and ({mime_filter})"
+
+    if GOOGLE_DRIVE_FOLDER_ID:
+        # Restrict traversal to one folder tree to avoid noisy personal drive ingestion.
+        query = (
+            f"trashed=false and ({mime_filter}) and "
+            f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents"
+        )
+        logger.info(f"Drive sync scoped to folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
+    else:
+        query = f"trashed=false and ({mime_filter})"
+        logger.warning("GOOGLE_DRIVE_FOLDER_ID not set → syncing from entire Google Drive (can be noisy).")
 
     all_files = []
     page_token = None
@@ -458,11 +472,8 @@ def fetch_notion_pages():
                 continue
 
             try:
-                # Fetch the full block content of the page.
-                blocks_url = f"https://api.notion.com/v1/blocks/{page_id}/children"
-                blocks_response = requests.get(blocks_url, headers=headers, timeout=30)
-                blocks_response.raise_for_status()
-                blocks = blocks_response.json().get("results", [])
+                # Fetch ALL block content recursively (handles nested pages/lists).
+                blocks = _fetch_all_blocks(page_id, headers)
 
                 # Convert Notion blocks into plain text.
                 text_content = _extract_text_from_blocks(blocks)
@@ -528,13 +539,42 @@ def _extract_page_title(page: dict) -> str:
     return page.get("id", "Untitled")
 
 
+def _fetch_all_blocks(block_id: str, headers: dict, depth: int = 0, max_depth: int = 5) -> list:
+    """
+    Recursively fetch all blocks (including nested children) for a given block/page ID.
+    """
+    if depth > max_depth:
+        return []
+    blocks = []
+    url = f"https://api.notion.com/v1/blocks/{block_id}/children"
+    while url:
+        try:
+            resp = requests.get(url, headers=headers, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            for block in data.get("results", []):
+                blocks.append(block)
+                if block.get("has_children"):
+                    child_blocks = _fetch_all_blocks(block["id"], headers, depth + 1, max_depth)
+                    blocks.extend(child_blocks)
+            # Handle pagination
+            if data.get("has_more"):
+                url = f"https://api.notion.com/v1/blocks/{block_id}/children?start_cursor={data['next_cursor']}"
+            else:
+                url = None
+        except Exception as e:
+            logger.warning(f"Failed to fetch children for block {block_id}: {e}")
+            break
+    return blocks
+
+
 def _extract_text_from_blocks(blocks: list) -> str:
     """
     Converts a list of Notion block objects into a flat plain text string.
 
-    Handles the most common block types:
+    Handles the most common block types including nested children:
       paragraph, heading_1/2/3, bulleted_list_item,
-      numbered_list_item, to_do, quote, callout, code.
+      numbered_list_item, to_do, quote, callout, code, table, toggle.
 
     Args:
         blocks: A list of Notion block objects from the blocks API.
@@ -551,9 +591,22 @@ def _extract_text_from_blocks(blocks: list) -> str:
         rich_text = block_data.get("rich_text", [])
         if rich_text:
             plain = " ".join([rt.get("plain_text", "") for rt in rich_text])
-            text_lines.append(plain)
+            if plain.strip():
+                text_lines.append(plain)
+        # Handle table rows
+        elif block_type == "table_row":
+            cells = block_data.get("cells", [])
+            row_texts = []
+            for cell in cells:
+                cell_text = " ".join([rt.get("plain_text", "") for rt in cell])
+                row_texts.append(cell_text)
+            if any(row_texts):
+                text_lines.append(" | ".join(row_texts))
+        # Handle dividers and blank lines for structure
+        elif block_type == "divider":
+            text_lines.append("---")
 
-    return "\n".join(text_lines)
+    return "\n".join(line for line in text_lines if line)
 
 
 # ===========================================================================

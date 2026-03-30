@@ -108,6 +108,7 @@ with st.sidebar:
     stats = get_db_stats()
     status_color = "🟢" if "Connected" in stats["status"] else "🔴"
     st.markdown(f"{status_color} **Vector DB:** {stats['status']}")
+    st.caption(f"Mode: {stats.get('app_mode', 'unknown')} · LLM: {stats.get('llm_provider', 'n/a')} ({stats.get('llm_model', 'n/a')})")
 
     col1, col2 = st.columns(2)
     col1.metric("📦 Chunks", stats["total_chunks"])
