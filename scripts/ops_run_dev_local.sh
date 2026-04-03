@@ -9,8 +9,8 @@ if ! command -v ollama >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Ensuring local model exists: qwen3.5:2b"
-ollama pull qwen3.5:2b
+echo "Ensuring local model exists: qwen3.5:0.8b"
+ollama pull qwen3.5:0.8b
 
 if [ -f .env ]; then
   if grep -q '^APP_MODE=' .env; then

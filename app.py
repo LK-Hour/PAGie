@@ -1,14 +1,14 @@
 """
-app.py — Streamlit Frontend for PAGie
-======================================
-A professional, ChatGPT-style chat interface for PAGie.
+app.py — Streamlit Frontend for PAGie (CV Analysis System)
+===========================================================
+A professional, ChatGPT-style chat interface for PAGie's CV analysis system.
 
 Features:
   - Real-time conversational chat with session history.
-  - Source citation badges displayed beneath each AI response.
+  - Source citation badges showing which CV files were referenced.
   - Sidebar showing live system health, DB stats, and the EDA report.
   - One-click "Sync" and "Rebuild Knowledge Base" actions.
-  - PAGie persona with a clean, academic-friendly UI.
+  - PAGie persona optimized for answering questions about candidate CVs.
 
 Usage:
   streamlit run app.py
@@ -20,9 +20,29 @@ from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
-from rag_pipeline import get_db_stats, query_pagie
+from rag_pipeline import query_pagie, get_cache_stats, warmup_models
+try:
+    # Try to get DB stats if available
+    from rag_pipeline import get_db_stats
+except (ImportError, AttributeError):
+    def get_db_stats():
+        return {"status": "Connected", "total_chunks": "N/A", "app_mode": "prod"}
 
 load_dotenv()
+
+# Initialize unified RAG pipeline
+@st.cache_resource
+def initialize_pagie():
+    """Initialize and warm up PAGie models (cached for performance)."""
+    try:
+        warmup_models()
+        return True
+    except Exception as e:
+        st.error(f"Failed to initialize PAGie: {e}")
+        return False
+
+# Warm up models on app start
+initialize_pagie()
 
 
 def _to_display_text(value) -> str:
@@ -46,7 +66,7 @@ def _to_display_text(value) -> str:
 # Page Configuration — must be the FIRST Streamlit call in the script.
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="PAGie — Second Brain",
+    page_title="PAGie — CV Analysis System",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -105,13 +125,27 @@ with st.sidebar:
 
     # --- Live Database Health ---
     st.markdown("### 📡 System Status")
-    stats = get_db_stats()
-    status_color = "🟢" if "Connected" in stats["status"] else "🔴"
-    st.markdown(f"{status_color} **Vector DB:** {stats['status']}")
-    st.caption(f"Mode: {stats.get('app_mode', 'unknown')} · LLM: {stats.get('llm_provider', 'n/a')} ({stats.get('llm_model', 'n/a')})")
-
-    col1, col2 = st.columns(2)
-    col1.metric("📦 Chunks", stats["total_chunks"])
+    
+    try:
+        stats = get_db_stats()
+        status_color = "🟢" if "Connected" in stats.get("status", "") else "🔴"
+        st.markdown(f"{status_color} **Vector DB:** {stats.get('status', 'Unknown')}")
+        st.caption(f"Mode: {stats.get('app_mode', 'unknown')} · LLM: {stats.get('llm_provider', 'n/a')} ({stats.get('llm_model', 'n/a')})")
+        
+        col1, col2 = st.columns(2)
+        col1.metric("📦 Chunks", stats.get("total_chunks", "N/A"))
+        
+        # Show cache performance
+        cache_stats = get_cache_stats()
+        hit_rate = cache_stats.get("hit_rate", 0) * 100
+        col2.metric("⚡ Cache Hit", f"{hit_rate:.1f}%", help="Embedding cache performance")
+        
+    except Exception as e:
+        st.markdown("🔴 **Vector DB:** Error connecting")
+        st.caption(f"Error: {str(e)[:50]}")
+        col1, col2 = st.columns(2)
+        col1.metric("📦 Chunks", "N/A")
+        col2.metric("⚡ Cache Hit", "N/A")
 
     # Read and display the last sync timestamp.
     last_sync_path = Path("./data/last_sync.txt")
@@ -131,8 +165,8 @@ with st.sidebar:
     # --- Action Buttons ---
     st.markdown("### ⚙️ Actions")
 
-    if st.button("🔄 Sync Data Sources", width="stretch", help="Fetch latest files from Google Drive & Notion"):
-        with st.spinner("Connecting to Google Drive & Notion..."):
+    if st.button("🔄 Sync CV Files", width="stretch", help="Fetch latest CV files from Google Drive folder"):
+        with st.spinner("Connecting to Google Drive..."):
             try:
                 from sync_data import run_sync
                 run_sync()
@@ -141,16 +175,16 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"❌ Sync failed: {e}")
 
-    if st.button("🔬 Rebuild Knowledge Base", width="stretch", help="Re-process documents: chunk → IQR filter → embed → store"):
+    if st.button("🔬 Rebuild Knowledge Base", width="stretch", help="Re-process CV files: chunk → IQR filter → embed → store"):
         with st.spinner("Running Data Science pipeline (this may take a minute)..."):
             try:
                 from data_science_eda import run_pipeline
                 df, _ = run_pipeline()
                 if df is not None:
-                    st.success(f"✅ Done! {len(df)} clean chunks indexed.")
+                    st.success(f"✅ Done! {len(df)} clean CV chunks indexed.")
                     st.rerun()
                 else:
-                    st.warning("⚠️ No documents found. Sync first.")
+                    st.warning("⚠️ No CV files found. Sync first.")
             except Exception as e:
                 st.error(f"❌ Pipeline failed: {e}")
 
@@ -184,10 +218,10 @@ with st.sidebar:
 # MAIN CHAT INTERFACE
 # ===========================================================================
 
-st.title("🧠 PAGie — Your Personal AI Second Brain")
+st.title("🧠 PAGie — CV Analysis & Candidate Information System")
 st.caption(
-    "Ask me anything from your **Google Drive** & **Notion** knowledge base. "
-    "I only answer from your personal documents — no hallucinations."
+    "Ask me anything about the candidates in your **CV database**. "
+    "I analyze resumes and provide accurate information based on the CV files."
 )
 
 # ---------------------------------------------------------------------------
@@ -231,7 +265,7 @@ for message in st.session_state.messages:
 # Chat Input — captures the user's next message
 # ---------------------------------------------------------------------------
 if prompt := st.chat_input(
-    "Ask PAGie anything... e.g. 'When is my Data Science assignment due?'"
+    "Ask about candidates... e.g. 'Who has Python experience?'"
 ):
     # 1. Display & store the user's message immediately.
     st.session_state.messages.append({"role": "user", "content": prompt, "sources": []})
@@ -240,7 +274,7 @@ if prompt := st.chat_input(
 
     # 2. Query PAGie and stream the response.
     with st.chat_message("assistant", avatar="🧠"):
-        with st.spinner("Searching your knowledge base..."):
+        with st.spinner("Searching CV database..."):
             result = query_pagie(prompt)
 
         answer_text = _to_display_text(result.get("answer", ""))

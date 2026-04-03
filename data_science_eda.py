@@ -1,13 +1,13 @@
 """
-data_science_eda.py — Data Science Processing Pipeline for PAGie
-=================================================================
-This is the core Data Science module. It implements the full
+data_science_eda.py — Data Science Processing Pipeline for PAGie (CV-Focused)
+==============================================================================
+This is the core Data Science module for CV analysis. It implements the full
 preprocessing and analysis pipeline as specified in the project proposal:
 
-  1. LOAD     → Load all raw documents from ./data/ (Drive + Notion)
-  2. CHUNK    → Split documents into fixed-size text chunks
+  1. LOAD     → Load all CV files from ./data/drive/ (Google Drive folder)
+  2. CHUNK    → Split CV documents into fixed-size text chunks
   3. ANALYZE  → Convert chunks to a Pandas DataFrame with word-count statistics
-  4. IQR      → Apply Interquartile Range method to remove statistical outliers
+  4. FILTER   → Apply minimum word-count threshold to remove empty/invalid chunks
   5. VISUALIZE → Generate 4 EDA plots and save to ./assets/eda_report.png
   6. EMBED    → Vectorize clean chunks and persist them to ChromaDB
 
@@ -18,6 +18,7 @@ Usage:
 import json
 import logging
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -30,8 +31,14 @@ from dotenv import load_dotenv
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_community.document_loaders import PyPDFLoader
+from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+# OCR imports for image-based PDFs
+import pytesseract
+from pdf2image import convert_from_path
+from PIL import Image
 
 # Load API keys from .env — required for embedding model.
 load_dotenv()
@@ -77,6 +84,79 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Text Cleaning Functions for CV Processing
+# ---------------------------------------------------------------------------
+def clean_ocr_text(text: str) -> str:
+    """
+    Clean OCR-extracted text to remove excessive spacing and formatting artifacts.
+    
+    Args:
+        text: Raw OCR text with potential spacing issues
+        
+    Returns:
+        Cleaned text with proper spacing and formatting
+    """
+    if not text:
+        return text
+    
+    # Remove excessive spacing between individual characters
+    # Pattern: "H  e  l  l  o" -> "Hello"
+    text = re.sub(r'\b([A-Za-z])\s+([A-Za-z])\s+([A-Za-z])', r'\1\2\3', text)
+    text = re.sub(r'\b([A-Za-z])\s+([A-Za-z])', r'\1\2', text)
+    
+    # Fix common OCR character spacing patterns
+    text = re.sub(r'(\w)\s+(\w)\s+(\w)\s+(\w)', r'\1\2\3\4', text)  # 4-letter words
+    text = re.sub(r'(\w)\s+(\w)\s+(\w)', r'\1\2\3', text)          # 3-letter words  
+    
+    # Multiple spaces to single space
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Fix common OCR mistakes
+    text = text.replace('|', 'I')  # Pipe to I
+    text = text.replace('0', 'O')  # Zero to O in names (context-dependent)
+    
+    # Clean up line breaks and extra whitespace
+    text = re.sub(r'\n\s*\n', '\n\n', text)  # Multiple newlines to double
+    text = text.strip()
+    
+    return text
+
+def clean_cv_text_content(text: str) -> str:
+    """
+    Specialized cleaning for CV/Resume text content.
+    
+    Args:
+        text: CV text content
+        
+    Returns:
+        Cleaned CV text optimized for RAG retrieval
+    """
+    if not text:
+        return text
+    
+    # First apply OCR cleaning
+    text = clean_ocr_text(text)
+    
+    # CV-specific cleaning patterns
+    # Remove email artifacts from OCR
+    text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', lambda m: m.group().replace(' ', ''), text)
+    
+    # Fix phone numbers with spaces
+    text = re.sub(r'(\+?\d)\s+(\d)\s+(\d)', r'\1\2\3', text)
+    
+    # Standardize section headers (remove extra spacing)
+    cv_sections = ['EDUCATION', 'EXPERIENCE', 'SKILLS', 'PROJECTS', 'CONTACT', 'SUMMARY', 'OBJECTIVE']
+    for section in cv_sections:
+        spaced_section = ' '.join(section)  # "E D U C A T I O N"
+        text = text.replace(spaced_section, section)
+    
+    # Remove excessive punctuation
+    text = re.sub(r'[•]{2,}', '•', text)  # Multiple bullets to single
+    text = re.sub(r'[-]{3,}', '---', text)  # Multiple dashes to triple
+    
+    return text
+
 
 # ===========================================================================
 # STEP 1 — LOAD: Read all raw documents from ./data/
@@ -95,13 +175,90 @@ def _should_keep_source(source: str) -> bool:
     return True
 
 
+def load_pdf_with_ocr(pdf_path: Path) -> list:
+    """
+    Load PDF with OCR fallback for image-based documents.
+    
+    First attempts standard text extraction using PyPDFLoader.
+    If no text is found, uses OCR (Tesseract) to extract text from PDF images.
+    
+    Args:
+        pdf_path: Path to the PDF file
+        
+    Returns:
+        List of LangChain Document objects with extracted text
+    """
+    documents = []
+    
+    try:
+        # Step 1: Try standard PDF text extraction
+        loader = PyPDFLoader(str(pdf_path))
+        pdf_docs = loader.load()
+        
+        # Clean the extracted text from standard PDF
+        for doc in pdf_docs:
+            if doc.page_content:
+                doc.page_content = clean_cv_text_content(doc.page_content)
+        
+        # Check if any meaningful text was extracted after cleaning
+        total_text_length = sum(len((doc.page_content or "").strip()) for doc in pdf_docs)
+        
+        if total_text_length > 50:  # Require meaningful content length
+            logger.info(f"  📄 Standard text extraction successful: {pdf_path.name}")
+            return pdf_docs
+        else:
+            logger.info(f"  🖼️  Insufficient text found in {pdf_path.name}, attempting OCR...")
+            
+            # Step 2: Use OCR for image-based PDFs
+            try:
+                # Convert PDF pages to images
+                images = convert_from_path(str(pdf_path), dpi=200)
+                
+                for page_num, image in enumerate(images, 1):
+                    # Extract text using Tesseract OCR
+                    ocr_text = pytesseract.image_to_string(image, lang='eng')
+                    
+                    # Clean the OCR text to remove spacing artifacts
+                    cleaned_text = clean_cv_text_content(ocr_text)
+                    
+                    if cleaned_text.strip():
+                        # Create a Document object similar to PyPDFLoader format
+                        doc = Document(
+                            page_content=cleaned_text,
+                            metadata={
+                                "source": str(pdf_path),
+                                "page": page_num - 1,  # 0-indexed like PyPDFLoader
+                                "extraction_method": "OCR_cleaned"
+                            }
+                        )
+                        documents.append(doc)
+                        logger.info(f"    📝 OCR extracted and cleaned {len(cleaned_text)} chars from page {page_num}")
+                    else:
+                        logger.warning(f"    ⚠️  No useful text found on page {page_num} after OCR cleaning")
+                        
+                if documents:
+                    logger.info(f"  ✅ OCR extraction successful: {pdf_path.name} ({len(documents)} pages)")
+                else:
+                    logger.warning(f"  ❌ No text extracted via OCR: {pdf_path.name}")
+                    
+                return documents
+                
+            except Exception as ocr_error:
+                logger.error(f"  ❌ OCR failed for {pdf_path.name}: {ocr_error}")
+                return []
+                
+    except Exception as e:
+        logger.error(f"  ❌ Failed to process PDF {pdf_path.name}: {e}")
+        return []
+
+
 def load_documents() -> list:
     """
-    Loads all text and PDF documents from the ./data/ directory tree.
+    Loads only CV documents from the ./data/drive/ directory.
 
-    Files in ./data/notion/ are tagged with platform='Notion'.
-    Files in ./data/drive/ are tagged with platform='Google Drive'.
-    This metadata is critical for the EDA platform-comparison charts.
+    This ensures PAGie focuses exclusively on CV/Resume analysis by only
+    loading documents from the Google Drive CV folder, excluding any
+    Notion or other data sources.
 
     Returns:
         A list of LangChain Document objects, each containing page_content
@@ -109,58 +266,73 @@ def load_documents() -> list:
     """
     all_docs = []
 
-    # --- Load .txt files (from both Google Drive and Notion directories) ---
-    try:
-        txt_loader = DirectoryLoader(
-            str(DATA_DIR),
-            glob="**/*.txt",
-            loader_cls=TextLoader,
-            loader_kwargs={"encoding": "utf-8"},
-            silent_errors=True,  # Skip files with encoding errors gracefully.
-        )
-        txt_docs = txt_loader.load()
+    # --- Load .txt files ONLY from the drive/ directory (CV-focused) ---
+    drive_dir = DATA_DIR / "drive"
+    if drive_dir.exists():
+        try:
+            txt_loader = DirectoryLoader(
+                str(drive_dir),  # Only load from data/drive/, not entire data/
+                glob="**/*.txt",
+                loader_cls=TextLoader,
+                loader_kwargs={"encoding": "utf-8"},
+                silent_errors=True,  # Skip files with encoding errors gracefully.
+            )
+            txt_docs = txt_loader.load()
 
-        # Attach source platform metadata to each document for EDA and apply source filters.
-        kept_txt_docs = []
-        for doc in txt_docs:
-            source = doc.metadata.get("source", "")
-            if not _should_keep_source(source):
-                continue
-            if len((doc.page_content or "").strip()) < MIN_CHARS_PER_DOC:
-                continue
-            doc.metadata["platform"] = "Notion" if "notion" in source.lower() else "Google Drive"
-            kept_txt_docs.append(doc)
+            # Attach source platform metadata and apply filters.
+            kept_txt_docs = []
+            for doc in txt_docs:
+                source = doc.metadata.get("source", "")
+                if not _should_keep_source(source):
+                    continue
+                if len((doc.page_content or "").strip()) < MIN_CHARS_PER_DOC:
+                    continue
+                doc.metadata["platform"] = "Google Drive CV"
+                kept_txt_docs.append(doc)
 
-        all_docs.extend(kept_txt_docs)
-        logger.info(f"Loaded {len(kept_txt_docs)} text file(s) after filtering.")
+            all_docs.extend(kept_txt_docs)
+            logger.info(f"Loaded {len(kept_txt_docs)} CV text file(s) after filtering.")
 
-    except Exception as e:
-        logger.error(f"Error loading .txt files: {e}")
+        except Exception as e:
+            logger.error(f"Error loading CV .txt files: {e}")
+    else:
+        logger.warning(f"CV directory {drive_dir} does not exist. Run sync_data.py first.")
 
-    # --- Load .pdf files (typically from Google Drive) ---
-    try:
-        pdf_paths = list(DATA_DIR.rglob("*.pdf"))
-        for pdf_path in pdf_paths:
-            try:
-                loader = PyPDFLoader(str(pdf_path))
-                pdf_docs = loader.load()
-                kept_pdf_docs = []
-                for doc in pdf_docs:
-                    source = doc.metadata.get("source", str(pdf_path))
-                    if not _should_keep_source(source):
-                        continue
-                    if len((doc.page_content or "").strip()) < MIN_CHARS_PER_DOC:
-                        continue
-                    doc.metadata["platform"] = "Google Drive"
-                    kept_pdf_docs.append(doc)
-                if kept_pdf_docs:
-                    all_docs.extend(kept_pdf_docs)
-                    logger.info(f"  ✅ Loaded PDF: {pdf_path.name} ({len(kept_pdf_docs)} page chunk(s))")
-            except Exception as e:
-                logger.error(f"  ❌ Failed to load PDF '{pdf_path.name}': {e}")
+    # --- Load .pdf files ONLY from the drive/ directory (CV-focused) ---
+    if drive_dir.exists():
+        try:
+            pdf_paths = list(drive_dir.rglob("*.pdf"))  # Only scan drive/ directory
+            for pdf_path in pdf_paths:
+                try:
+                    # Use OCR-enabled PDF loader
+                    pdf_docs = load_pdf_with_ocr(pdf_path)
+                    
+                    kept_pdf_docs = []
+                    for doc in pdf_docs:
+                        source = doc.metadata.get("source", str(pdf_path))
+                        if not _should_keep_source(source):
+                            continue
+                        if len((doc.page_content or "").strip()) < MIN_CHARS_PER_DOC:
+                            continue
+                        # Add extraction method to metadata
+                        extraction_method = doc.metadata.get("extraction_method", "Standard")
+                        doc.metadata["platform"] = f"Google Drive CV ({extraction_method})"
+                        kept_pdf_docs.append(doc)
+                        
+                    if kept_pdf_docs:
+                        all_docs.extend(kept_pdf_docs)
+                        extraction_info = f"({kept_pdf_docs[0].metadata.get('extraction_method', 'Standard')})"
+                        logger.info(f"  ✅ Loaded CV PDF: {pdf_path.name} {extraction_info} ({len(kept_pdf_docs)} page chunk(s))")
+                    else:
+                        logger.warning(f"  ⚠️  Filtered out {pdf_path.name} (no content after filtering)")
+                        
+                except Exception as e:
+                    logger.error(f"  ❌ Failed to load CV PDF '{pdf_path.name}': {e}")
 
-    except Exception as e:
-        logger.error(f"Error scanning for PDF files: {e}")
+        except Exception as e:
+            logger.error(f"Error scanning for CV PDF files: {e}")
+    else:
+        logger.warning(f"CV directory {drive_dir} does not exist for PDF loading.")
 
     logger.info(f"Total documents loaded: {len(all_docs)}")
     return all_docs
@@ -209,8 +381,8 @@ def build_dataframe(chunks: list) -> pd.DataFrame:
       - chunk_id   : Integer index used to reference back to the chunks list.
       - word_count : Number of words (primary feature for IQR analysis).
       - char_count : Number of characters.
-      - platform   : 'Notion' or 'Google Drive' (for comparative EDA).
-      - source     : Full file path of the originating document.
+      - platform   : 'Google Drive' (all CV files come from Drive).
+      - source     : Full file path of the originating CV document.
 
     Args:
         chunks: List of LangChain Document objects (raw chunks).
@@ -248,34 +420,25 @@ def build_dataframe(chunks: list) -> pd.DataFrame:
 MIN_WORD_COUNT = 5
 
 
-def apply_iqr_filter(df: pd.DataFrame) -> pd.DataFrame:
+def apply_semantic_filter(df: pd.DataFrame) -> pd.DataFrame:
     """
     Removes semantically empty chunks using a minimum word-count threshold.
 
+    For CV analysis, we want to preserve all meaningful content regardless of length.
+    This filter only removes genuinely empty or invalid chunks (page numbers, 
+    stray OCR characters, empty table cells) using a domain-appropriate threshold.
+
     Design rationale
     ----------------
-    IQR (Interquartile Range) is a classic statistical outlier method designed
-    for numerical measurements such as sensor readings. Applied naively to
-    text, it introduces content bias:
+    A simple word-count threshold (>= MIN_WORD_COUNT, default: 5) removes
+    genuine artifacts without discarding valuable CV content:
+      
+      • Short chunks like "Python, Java, React" (skills) are preserved
+      • Long chunks with detailed experience descriptions are preserved  
+      • Only truly empty chunks (page numbers, OCR errors) are removed
 
-      • The lower fence (Q1 − 1.5×IQR) becomes negative for this dataset
-        (≈ −56 words), so it never actually filters anything — yet it gives
-        a false impression of statistical rigour.
-      • The upper fence removes long chunks that are semantically valid and
-        would otherwise provide valuable context to the LLM.
-      • IQR treats length as a proxy for quality, which is incorrect:
-        a 3-word chunk "CADT, Phnom Penh" is short but factually critical,
-        while a 50-word chunk of repeated boilerplate is useless.
-
-    The chosen approach instead uses a single, domain-justified threshold:
-      word_count >= MIN_WORD_COUNT (default: 5)
-
-    This removes genuine artifacts (page numbers, stray OCR characters,
-    empty table cells) without discarding any real content, regardless of
-    how long or short it is. It is unbiased with respect to chunk length.
-
-    IQR statistics are still *computed and logged* below for transparency
-    and to provide the EDA visualisation with distribution context.
+    This approach is unbiased with respect to chunk length and preserves
+    all semantically valuable CV information.
 
     Args:
         df: DataFrame with a 'word_count' column.
@@ -283,22 +446,10 @@ def apply_iqr_filter(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         A filtered DataFrame retaining all chunks with >= MIN_WORD_COUNT words.
     """
-    # --- Still compute IQR statistics for EDA reporting purposes ---
-    Q1 = df["word_count"].quantile(0.25)
-    Q3 = df["word_count"].quantile(0.75)
-    IQR = Q3 - Q1
-    iqr_lower = Q1 - 1.5 * IQR
-    iqr_upper = Q3 + 1.5 * IQR
-
     logger.info("\n--- Chunk Quality Filter Analysis ---")
-    logger.info(f"  Distribution Q1       : {Q1:.1f} words")
-    logger.info(f"  Distribution Q3       : {Q3:.1f} words")
-    logger.info(f"  IQR (for reference)   : {IQR:.1f} words")
-    logger.info(f"  IQR lower fence       : {iqr_lower:.1f} words  (negative → never triggers)")
-    logger.info(f"  IQR upper fence       : {iqr_upper:.1f} words  (not applied — biased)")
     logger.info(f"  Applied threshold     : word_count >= {MIN_WORD_COUNT} (semantic minimum)")
-
-    # Apply the semantic minimum threshold — no upper bound.
+    
+    # Apply the semantic minimum threshold — preserves all meaningful content.
     df_filtered = df[df["word_count"] >= MIN_WORD_COUNT].copy()
 
     removed = len(df) - len(df_filtered)
@@ -316,29 +467,28 @@ def generate_eda_plots(df_raw: pd.DataFrame, df_filtered: pd.DataFrame):
     """
     Generates and saves a 2×2 panel of EDA visualizations to ./assets/eda_report.png.
 
-    The four charts fulfil the exact EDA requirements from the project proposal:
+    The four charts provide analysis of the CV dataset:
 
-      [Top-Left]  Histogram  — Chunk word count distribution, before vs. after quality filter.
+      [Top-Left]  Histogram  — CV chunk word count distribution, before vs. after quality filter.
                                Shows the applied minimum threshold and post-filter mean.
 
-      [Top-Right] Boxplot    — Comparing word count spread between Notion and Google Drive.
-                               Expected insight: Notion pages are shorter and more structured.
+      [Top-Right] Boxplot    — Word count distribution for CV documents.
+                               Shows consistency and spread of CV content chunks.
 
-      [Bot-Left]  Pie Chart  — Proportion of cleaned knowledge base by source platform.
-                               Shows which platform contributes more data.
+      [Bot-Left]  Pie Chart  — Proportion of total chunks by CV source files.
+                               Shows data distribution across different CV documents.
 
       [Bot-Right] Scatter    — Quality filter map. Red × = removed artifacts (< 5 words).
-                               IQR fences shown as reference lines to illustrate why the
-                               data-driven approach is unsuitable for this dataset.
+                               Shows which chunks were filtered out as noise.
 
     Args:
-        df_raw      : DataFrame before IQR filtering (all chunks).
-        df_filtered : DataFrame after IQR filtering (clean chunks only).
+        df_raw      : DataFrame before filtering (all chunks).
+        df_filtered : DataFrame after filtering (clean chunks only).
     """
     sns.set_theme(style="whitegrid", palette="muted", font_scale=1.1)
     fig, axes = plt.subplots(2, 2, figsize=(15, 11))
     fig.suptitle(
-        "PAGie — Knowledge Base Exploratory Data Analysis (EDA)",
+        "PAGie — CV Database Exploratory Data Analysis (EDA)",
         fontsize=17,
         fontweight="bold",
         y=1.01,
@@ -350,7 +500,7 @@ def generate_eda_plots(df_raw: pd.DataFrame, df_filtered: pd.DataFrame):
     ax1 = axes[0, 0]
     ax1.hist(df_raw["word_count"], bins=30, alpha=0.45, color="#4C72B0", label="Before filtering")
     ax1.hist(df_filtered["word_count"], bins=30, alpha=0.75, color="#55A868", label="After filtering")
-    ax1.set_title("Chunk Word Count Distribution\n(Before vs. After Quality Filtering)")
+    ax1.set_title("CV Chunk Word Count Distribution\n(Before vs. After Quality Filtering)")
     ax1.set_xlabel("Word Count per Chunk")
     ax1.set_ylabel("Number of Chunks")
     ax1.axvline(MIN_WORD_COUNT, color="orange", linestyle="--", linewidth=1.8,
@@ -360,41 +510,31 @@ def generate_eda_plots(df_raw: pd.DataFrame, df_filtered: pd.DataFrame):
     ax1.legend(fontsize=9)
 
     # -----------------------------------------------------------------------
-    # Plot 2 (Top-Right): Boxplot — Word count by source platform
+    # Plot 2 (Top-Right): Boxplot — Word count distribution
     # -----------------------------------------------------------------------
     ax2 = axes[0, 1]
-    platforms = df_filtered["platform"].unique()
-    if len(platforms) > 1:
-        # Comparative boxplot: visualizes that Notion pages are shorter than Drive docs.
-        platform_data = [
-            df_filtered[df_filtered["platform"] == p]["word_count"].values
-            for p in platforms
-        ]
-        bp = ax2.boxplot(platform_data, labels=platforms, patch_artist=True,
-                         medianprops={"color": "black", "linewidth": 2})
-        colors = ["#4C72B0", "#DD8452"]
-        for patch, color in zip(bp["boxes"], colors):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.7)
-    else:
-        # Fallback: single platform boxplot
-        ax2.boxplot(df_filtered["word_count"], patch_artist=True,
-                    boxprops={"facecolor": "#4C72B0", "alpha": 0.7})
-        ax2.set_xticks([1])
-        ax2.set_xticklabels(platforms if len(platforms) == 1 else ["All"])
-    ax2.set_title("Word Count Distribution by Source Platform")
-    ax2.set_xlabel("Platform")
+    ax2.boxplot(df_filtered["word_count"], patch_artist=True,
+                boxprops={"facecolor": "#4C72B0", "alpha": 0.7},
+                medianprops={"color": "black", "linewidth": 2})
+    ax2.set_title("CV Content Word Count Distribution")
+    ax2.set_xlabel("CV Dataset")
     ax2.set_ylabel("Word Count per Chunk")
+    ax2.set_xticklabels(["All CVs"])
 
     # -----------------------------------------------------------------------
-    # Plot 3 (Bot-Left): Pie Chart — Knowledge base composition
+    # Plot 3 (Bot-Left): Pie Chart — CV file distribution
     # -----------------------------------------------------------------------
     ax3 = axes[1, 0]
-    platform_counts = df_filtered["platform"].value_counts()
-    colors_pie = ["#4C72B0", "#DD8452", "#55A868", "#C44E52"][:len(platform_counts)]
+    # Group by source file (CV name)
+    source_counts = df_filtered.groupby("source").size().nlargest(8)  # Top 8 CV files
+    colors_pie = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3", "#CCB974", "#64B5CD", "#CA7EB8"][:len(source_counts)]
+    
+    # Shorten source paths to just filenames
+    source_labels = [Path(s).name for s in source_counts.index]
+    
     wedges, texts, autotexts = ax3.pie(
-        platform_counts,
-        labels=platform_counts.index,
+        source_counts,
+        labels=source_labels,
         autopct="%1.1f%%",
         colors=colors_pie,
         startangle=90,
@@ -403,7 +543,7 @@ def generate_eda_plots(df_raw: pd.DataFrame, df_filtered: pd.DataFrame):
     for autotext in autotexts:
         autotext.set_fontsize(11)
         autotext.set_fontweight("bold")
-    ax3.set_title("Knowledge Base Composition\nby Source Platform")
+    ax3.set_title("CV Data Distribution\n(Top 8 Files by Chunk Count)")
 
     # -----------------------------------------------------------------------
     # Plot 4 (Bot-Right): Scatter — Chunk quality filter map
@@ -436,12 +576,7 @@ def generate_eda_plots(df_raw: pd.DataFrame, df_filtered: pd.DataFrame):
     # Applied threshold line.
     ax4.axhline(MIN_WORD_COUNT, color="red", linestyle="-", linewidth=2,
                 label=f"Applied threshold ({MIN_WORD_COUNT} words)")
-    # IQR reference lines — shown as dashed to contrast with the applied threshold.
-    ax4.axhline(iqr_upper, color="grey", linestyle="--", linewidth=1.2,
-                label=f"IQR upper fence ({iqr_upper:.0f} words) — not applied")
-    ax4.axhline(iqr_lower, color="lightgrey", linestyle="--", linewidth=1.2,
-                label=f"IQR lower fence ({iqr_lower:.0f} words) — negative, never triggered")
-    ax4.set_title("Chunk Quality Filter Map\n(Semantic Threshold vs. IQR Reference)")
+    ax4.set_title("CV Chunk Quality Filter Map\n(Retention vs. Removal)")
     ax4.set_xlabel("Chunk Index")
     ax4.set_ylabel("Word Count")
     ax4.legend(fontsize=8)
@@ -477,7 +612,7 @@ def embed_and_store(df_filtered: pd.DataFrame, all_chunks: list) -> Chroma:
     critical connection between the Data Science pipeline and the RAG pipeline.
 
     Args:
-        df_filtered  : DataFrame of clean chunks (post-IQR), with chunk_id column.
+        df_filtered  : DataFrame of clean chunks (post-semantic-filtering), with chunk_id column.
         all_chunks   : The full list of LangChain Document chunks (pre-filter).
 
     Returns:
@@ -560,7 +695,7 @@ def run_pipeline():
     and can also be run directly from the command line.
 
     Pipeline Order:
-      LOAD → CHUNK → ANALYZE → IQR FILTER → VISUALIZE → EMBED → STORE
+      LOAD → CHUNK → ANALYZE → FILTER → VISUALIZE → EMBED → STORE
 
     Returns:
         Tuple[pd.DataFrame | None, Chroma | None]:
@@ -585,8 +720,8 @@ def run_pipeline():
     # Step 3: Build statistical DataFrame
     df_raw = build_dataframe(chunks)
 
-    # Step 4: Apply IQR to remove low-quality outlier chunks
-    df_filtered = apply_iqr_filter(df_raw)
+    # Step 4: Apply semantic filtering to remove empty/invalid chunks
+    df_filtered = apply_semantic_filter(df_raw)
 
     # Step 5: Generate EDA visualizations for the project report
     generate_eda_plots(df_raw, df_filtered)

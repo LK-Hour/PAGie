@@ -1,20 +1,20 @@
 """
-sync_data.py — Smart ETL Pipeline for PAGie
-=============================================
+sync_data.py — Smart ETL Pipeline for PAGie (CV-Focused)
+========================================================
 This is the Extract-Transform-Load (ETL) script that forms the foundation
-of PAGie's knowledge base. It connects to two data sources:
+of PAGie's CV analysis system. It connects to a specific Google Drive folder
+containing CV/Resume files:
 
-  1. Google Drive API  → Downloads PDFs, Google Docs, and text files.
-  2. Notion REST API   → Fetches pages from a Notion database.
+  Google Drive API  → Downloads PDFs and Google Docs from a designated folder.
 
 **Smart Sync (Incremental):**
   A sync-state manifest is persisted at ./data/sync_state.json. Each entry
-  records the remote modification timestamp of every file/page downloaded.
+  records the remote modification timestamp of every file downloaded.
   On subsequent runs, only files whose remote timestamp has changed (or that
   are brand-new) are re-downloaded, dramatically cutting API usage and time.
   Locally saved files that no longer exist in the source are also removed.
 
-All downloaded files are saved to the ./data/ directory for processing
+All downloaded CV files are saved to the ./data/drive/ directory for processing
 by data_science_eda.py. A nightly schedule runs this automatically at 02:00 AM.
 
 Usage:
@@ -52,33 +52,32 @@ SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 # have to re-authenticate on every run.
 TOKEN_FILE = "token.json"
 
-# Supported Google Drive MIME types — only these are downloaded.
-# We skip binary formats (images, videos, spreadsheets) that cannot be
-# meaningfully ingested as text into the RAG pipeline.
+# Supported Google Drive MIME types — focused on CV/Resume formats.
+# We download documents and PDFs which are the most common CV formats.
 SUPPORTED_MIME_TYPES = [
     "application/vnd.google-apps.document",       # Google Docs
-    "application/vnd.google-apps.presentation",  # Google Slides
     "application/pdf",                            # PDFs
     "text/plain",                                 # Plain text files
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # DOCX
 ]
 
-# Optional: Restrict sync to a specific Google Drive folder (recommended to reduce noisy corpus).
-# If unset, sync scans the entire drive for supported file types.
+# REQUIRED: Specific Google Drive folder ID containing CV files
+# Set in .env as GOOGLE_DRIVE_FOLDER_ID
 GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
 
-# Notion Integration Token — obtained from https://www.notion.so/my-integrations
-# Supports both legacy format (secret_...) and new format (ntn_...).
-NOTION_TOKEN = os.getenv("NOTION_TOKEN")
+if not GOOGLE_DRIVE_FOLDER_ID:
+    raise ValueError(
+        "GOOGLE_DRIVE_FOLDER_ID is required in .env file. "
+        "PAGie is now focused on a specific folder containing CV files."
+    )
 
-# Local directories for storing raw downloaded data.
+# Local directories for storing raw downloaded CV data.
 DATA_DIR = Path("./data")
 DRIVE_DIR = DATA_DIR / "drive"
-NOTION_DIR = DATA_DIR / "notion"
 
 # Ensure directories exist before writing.
 DATA_DIR.mkdir(exist_ok=True)
 DRIVE_DIR.mkdir(exist_ok=True)
-NOTION_DIR.mkdir(exist_ok=True)
 
 # Sync-state manifest — records the last-known modification timestamp for every
 # synced file/page so unchanged content is skipped on future runs.
@@ -199,16 +198,12 @@ def _list_all_drive_files(service) -> list:
     # Build a MIME type filter — only fetch file types we can process as text.
     mime_filter = " or ".join([f"mimeType='{m}'" for m in SUPPORTED_MIME_TYPES])
 
-    if GOOGLE_DRIVE_FOLDER_ID:
-        # Restrict traversal to one folder tree to avoid noisy personal drive ingestion.
-        query = (
-            f"trashed=false and ({mime_filter}) and "
-            f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents"
-        )
-        logger.info(f"Drive sync scoped to folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
-    else:
-        query = f"trashed=false and ({mime_filter})"
-        logger.warning("GOOGLE_DRIVE_FOLDER_ID not set → syncing from entire Google Drive (can be noisy).")
+    # Restrict traversal to the specific CV folder.
+    query = (
+        f"trashed=false and ({mime_filter}) and "
+        f"'{GOOGLE_DRIVE_FOLDER_ID}' in parents"
+    )
+    logger.info(f"Drive sync scoped to CV folder ID: {GOOGLE_DRIVE_FOLDER_ID}")
 
     all_files = []
     page_token = None
@@ -615,9 +610,9 @@ def _extract_text_from_blocks(blocks: list) -> str:
 
 def run_sync():
     """
-    Master function that orchestrates the full ETL sync.
+    Master function that orchestrates the CV file sync from Google Drive.
 
-    Runs both Google Drive and Notion pipelines in sequence.
+    Downloads CV files from the specified Google Drive folder.
     After a successful sync, writes a timestamp to data/last_sync.txt,
     which is displayed in the Streamlit sidebar.
 
@@ -625,21 +620,19 @@ def run_sync():
     to run every night at 02:00 AM.
     """
     logger.info("=" * 60)
-    logger.info(f"🔄 PAGie ETL Sync started — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"🔄 PAGie CV Sync started — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"📁 Target folder: {GOOGLE_DRIVE_FOLDER_ID}")
     logger.info("=" * 60)
 
-    logger.info("📂 Step 1/2 — Syncing Google Drive...")
+    logger.info("📂 Syncing CV files from Google Drive...")
     download_drive_files()
-
-    logger.info("📝 Step 2/2 — Syncing Notion...")
-    fetch_notion_pages()
 
     # Persist a sync timestamp so the Streamlit UI can display it.
     with open(DATA_DIR / "last_sync.txt", "w") as f:
         f.write(datetime.now().isoformat())
 
     logger.info("=" * 60)
-    logger.info("✅ PAGie ETL Sync complete! Run data_science_eda.py to rebuild the knowledge base.")
+    logger.info("✅ PAGie CV Sync complete! Run data_science_eda.py to rebuild the knowledge base.")
     logger.info("=" * 60)
 
 

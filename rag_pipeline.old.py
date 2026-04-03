@@ -338,18 +338,27 @@ def _build_enhanced_prompt() -> str:
 CORE PRINCIPLES:
 • Answer ONLY based on the provided CV data - never fabricate information
 • If information is unavailable, explicitly state "This information is not available in the provided CV data"
-• Always cite your sources using the [Source: filename] references
 • Use third-person references (e.g., "John has experience with..." not "you have experience")
 • Be concise but comprehensive - provide specific details when available
 
 RESPONSE FORMAT:
-**Summary:** [2-3 sentence overview directly answering the question]
-**Details:** 
-- [Specific fact/skill with source citation]
-- [Another relevant detail with source citation]  
-- [Additional context if available]
+🧠 **Summary:** [2-3 sentence overview directly answering the question]
 
-**Sources:** [List the CV files referenced]
+**Details:**
+• **Contact Information:** Phone, email, location (when available)
+• **Technical Skills:** Programming languages, frameworks, databases, tools
+• **Soft Skills:** Communication, leadership, teamwork abilities  
+• **Languages:** Spoken language proficiencies
+• **Education:** Academic background and institutions
+• **Experience/Projects:** Work history and notable projects
+
+CRITICAL FORMATTING RULES:
+• DO NOT include any source citations within the text content
+• DO NOT write "(Source: filename.pdf)" anywhere in your response
+• DO NOT mention filenames in the main response text
+• Present information cleanly without inline references
+• Group related information together logically
+• Use bullet points for lists and clear section headers
 
 QUALITY STANDARDS:
 • Prioritize recent and relevant information
@@ -358,7 +367,11 @@ QUALITY STANDARDS:
 • If multiple candidates match criteria, mention all relevant ones
 • Distinguish between skills (technical abilities) and experience (work history)
 
-Remember: Professional accuracy over creativity - stick to the facts in the CV data."""
+FORMATTING EXAMPLES:
+✅ GOOD: **Programming Languages:** Python, JavaScript, PHP, C++
+❌ BAD: **Programming Languages:** Python (Source: CV.pdf), JavaScript (Source: CV.pdf)
+
+Remember: Clean, professional presentation without any source citations in the main content."""
 
 # ---------------------------------------------------------------------------
 # Core RAG Function with Enhanced Accuracy
@@ -367,6 +380,82 @@ def _is_resource_exhausted_error(err: Exception) -> bool:
     """Check if error indicates API quota exhaustion."""
     msg = str(err).lower()
     return "resource_exhausted" in msg or "429" in msg or "quota" in msg
+
+
+def _extract_relevant_sources(selected_docs, answer_text: str, query: str) -> list:
+    """
+    Extract sources that are actually relevant to the response.
+    
+    Uses content overlap analysis to determine which sources contributed
+    meaningful information to the answer.
+    
+    Args:
+        selected_docs: Retrieved documents
+        answer_text: Generated response text
+        query: Original user query
+        
+    Returns:
+        List of relevant source filenames
+    """
+    if not selected_docs or not answer_text:
+        return []
+    
+    # Clean answer text for analysis (remove formatting)
+    clean_answer = re.sub(r'[*#_`]', '', answer_text.lower())
+    query_lower = query.lower()
+    
+    relevant_sources = []
+    source_scores = {}
+    
+    for doc in selected_docs:
+        source = doc.metadata.get('source', 'unknown')
+        source_name = Path(source).name if source != 'unknown' else 'unknown'
+        
+        if source_name in source_scores:
+            continue  # Already scored this source
+            
+        # Calculate relevance score based on content overlap
+        doc_content = (doc.page_content or "").lower()
+        
+        # Score factors:
+        score = 0
+        
+        # 1. Key terms from document appear in answer
+        doc_words = set(re.findall(r'\b\w{3,}\b', doc_content))
+        answer_words = set(re.findall(r'\b\w{3,}\b', clean_answer))
+        overlap_ratio = len(doc_words.intersection(answer_words)) / max(len(answer_words), 1)
+        score += overlap_ratio * 100
+        
+        # 2. Document relevance to query
+        query_words = set(re.findall(r'\b\w{3,}\b', query_lower))
+        query_relevance = len(doc_words.intersection(query_words)) / max(len(query_words), 1)
+        score += query_relevance * 50
+        
+        # 3. Content length bonus (longer docs are more likely to be relevant)
+        if len(doc_content) > 100:
+            score += 10
+            
+        source_scores[source_name] = score
+    
+    # Select sources above relevance threshold, sorted by score
+    threshold = 15  # Minimum relevance score
+    relevant_sources = [
+        source for source, score in sorted(
+            source_scores.items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        ) 
+        if score >= threshold
+    ]
+    
+    # Ensure we have at least one source if documents were retrieved
+    if not relevant_sources and selected_docs:
+        # Fallback: include the highest-scoring source
+        best_source = max(source_scores.items(), key=lambda x: x[1])[0]
+        relevant_sources = [best_source]
+    
+    return relevant_sources
+
 
 def _normalize_llm_text(content: Any) -> str:
     """Normalize various LLM response formats to clean text."""
@@ -489,18 +578,11 @@ Analyze the CV data above and provide a structured answer following the specifie
         
         llm_time = time.time() - llm_start
         
-        # Step 7: Response normalization and source extraction
+        # Step 7: Response normalization and intelligent source extraction
         answer_text = _normalize_llm_text(response)
         
-        # Extract unique sources with stable ordering
-        sources = []
-        seen_sources = set()
-        for doc in selected_docs:
-            source = doc.metadata.get('source', 'unknown')
-            source_name = Path(source).name if source != 'unknown' else 'unknown'
-            if source_name not in seen_sources:
-                sources.append(source_name)
-                seen_sources.add(source_name)
+        # Extract sources that were actually relevant to the response
+        sources = _extract_relevant_sources(selected_docs, answer_text, user_question)
         
         total_time = time.time() - start_time
         logger.info(f"Query completed in {total_time:.3f}s (LLM: {llm_time:.3f}s, {len(sources)} sources)")

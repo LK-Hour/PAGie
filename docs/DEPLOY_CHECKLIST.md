@@ -14,7 +14,7 @@
 ## 3) Dev mode (local LLM)
 - [ ] Install/start Ollama
 - [ ] `./ops_run_dev_local.sh`
-- [ ] In sidebar, verify: `Mode: dev`, `LLM: ollama (qwen3.5:2b)`
+- [ ] In sidebar, verify: `Mode: dev`, `LLM: ollama (qwen3.5:0.8b)`
 
 ## 4) Rebuild clean vector DB
 - [ ] `./ops_backup_reset_rebuild.sh`
