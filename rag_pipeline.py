@@ -44,7 +44,12 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # ---------------------------------------------------------------------------
 load_dotenv()
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+# Support both Streamlit secrets (for cloud deployment) and .env (for local)
+try:
+    import streamlit as st
+    GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", os.getenv("GOOGLE_API_KEY"))
+except (ImportError, FileNotFoundError):
+    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # Configuration from environment (with sensible defaults)
 APP_MODE = os.getenv("APP_MODE", "dev").lower()  # dev|prod

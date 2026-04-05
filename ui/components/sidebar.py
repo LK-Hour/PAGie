@@ -180,7 +180,7 @@ def _render_action_buttons() -> None:
                  help="Re-process CV files: chunk → IQR filter → embed → store"):
         with st.spinner("Running Data Science pipeline (this may take a minute)..."):
             try:
-                from data_science_eda import run_pipeline
+                from docs.data_science_eda import run_pipeline
                 df, _ = run_pipeline()
                 if df is not None:
                     st.success(f"Done! {len(df)} clean CV chunks indexed.")

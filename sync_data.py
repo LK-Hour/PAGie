@@ -634,6 +634,15 @@ def run_sync():
     logger.info("=" * 60)
     logger.info("✅ PAGie CV Sync complete! Run data_science_eda.py to rebuild the knowledge base.")
     logger.info("=" * 60)
+    
+    # Sync ChromaDB to cloud after data update (for cloud deployment)
+    try:
+        from gcs_sync import auto_sync_after_update
+        auto_sync_after_update()
+    except ImportError:
+        logger.warning("gcs_sync module not found - skipping cloud sync")
+    except Exception as e:
+        logger.error(f"Failed to sync ChromaDB to cloud: {e}")
 
 
 # ===========================================================================

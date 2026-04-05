@@ -104,6 +104,54 @@ python test_performance.py
 
 ---
 
+## 🌐 Deployment to Streamlit Community Cloud
+
+PAGie can be deployed for free on [Streamlit Community Cloud](https://streamlit.io/cloud):
+
+### **Prerequisites:**
+1. GitHub account with this repository pushed
+2. Google Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
+
+### **Deployment Steps:**
+
+#### 1. **Prepare Your Repository** (Already Done! ✅)
+- `.streamlit/config.toml` - UI configuration
+- `.streamlit/secrets.toml.example` - Secrets template
+- Code updated to support Streamlit secrets
+
+#### 2. **Deploy to Streamlit Cloud**
+1. Visit: https://share.streamlit.io/
+2. Sign in with your GitHub account
+3. Click **"New app"**
+4. Configure:
+   - **Repository:** `LK-Hour/PAGie`
+   - **Branch:** `main`
+   - **Main file:** `app.py`
+5. Click **"Advanced settings"**
+
+#### 3. **Add Your Secrets**
+In the **Secrets** section, add:
+```toml
+GOOGLE_API_KEY = "your-actual-gemini-api-key-here"
+```
+
+#### 4. **Deploy!**
+Click **"Deploy"** and wait 2-3 minutes for your app to go live! 🚀
+
+### **Important Notes:**
+- ⚠️ **Google Drive sync won't work in cloud** (requires OAuth tokens)
+- ⚠️ **ChromaDB resets on each deployment** (not persistent in free tier)
+- ✅ **Chat interface works perfectly** for demo purposes
+- ✅ **Query existing ChromaDB** if you upload your `chroma_db/` to the repo
+
+### **For Production Use:**
+Consider upgrading to persistent storage:
+- Use Google Cloud Storage for ChromaDB
+- Implement proper OAuth flow for Google Drive
+- Or use Streamlit's [file uploader](https://docs.streamlit.io/library/api-reference/widgets/st.file_uploader) for CV files
+
+---
+
 ## 📂 Repository Structure
 ```text
 PAGie_Project/
