@@ -10,7 +10,7 @@ Create a file named `README.md` in the root of your folder, and paste this entir
 ***
 
 ```markdown
-# 🧠 PAGie: Personal AI Generation & Information Engine
+# PAGie: Personal AI Generation & Information Engine
 
 **An Automated "Second Brain" RAG Pipeline using Google Drive, Notion, and Gemini 3.0**
 

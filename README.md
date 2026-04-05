@@ -1,4 +1,4 @@
-# 🧠 PAGie: Personal AI Generation & Information Engine
+# PAGie: Personal AI Generation & Information Engine
 
 **An Intelligent CV Analysis RAG System using Google Drive and Gemini 3.0**
 

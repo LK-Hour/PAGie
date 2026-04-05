@@ -133,8 +133,8 @@ def _build_chat_model(provider: str):
         return ChatGoogleGenerativeAI(
             model=GEMINI_MODEL,
             google_api_key=GOOGLE_API_KEY,
-            temperature=0.15,  # Balanced for factuality + variety
-            max_tokens=1024,   # Force conciseness
+            temperature=0.6,  # Conversational but accurate
+            max_tokens=1500,   # Allow thoughtful responses
         )
 
     if provider == "ollama":
@@ -144,7 +144,7 @@ def _build_chat_model(provider: str):
         return ChatOllama(
             model=LOCAL_LLM_MODEL,
             base_url=OLLAMA_BASE_URL,
-            temperature=0.15,
+            temperature=0.6,  # Conversational but accurate
         )
 
     raise ValueError(f"Unsupported provider: {provider}")
@@ -211,6 +211,116 @@ def _cache_embedding(text: str, embedding: np.ndarray):
 # ---------------------------------------------------------------------------
 # Query Enhancement and Intent Detection
 # ---------------------------------------------------------------------------
+def _classify_query_intent(query: str) -> str:
+    """
+    Classify the intent of the user query.
+    
+    Returns:
+        - 'pagie_info': Questions about PAGie itself
+        - 'cv_analysis': Questions about CV/candidate data (use RAG)
+        - 'out_of_scope': General questions outside CV domain
+    """
+    query_lower = query.lower().strip()
+    
+    # Check for PAGie-specific questions
+    pagie_keywords = [
+        "who is pagie", "what is pagie", "who are you", "what are you",
+        "tell me about pagie", "describe pagie", "yourself",
+        "what can you do", "your capabilities", "your purpose",
+        "how do you work", "what do you know"
+    ]
+    
+    if any(keyword in query_lower for keyword in pagie_keywords):
+        return 'pagie_info'
+    
+    # Check for clearly out-of-scope questions
+    general_keywords = [
+        "weather", "news", "sports", "entertainment", "politics",
+        "cooking", "recipe", "movie", "music", "travel", "shopping",
+        "math problem", "calculation", "translate", "definition",
+        "current events", "stock market", "cryptocurrency"
+    ]
+    
+    if any(keyword in query_lower for keyword in general_keywords):
+        return 'out_of_scope'
+    
+    # Check for CV/candidate analysis keywords
+    cv_keywords = [
+        "candidate", "cv", "resume", "skill", "experience", "education",
+        "work", "job", "position", "role", "qualification", "background",
+        "profile", "project", "achievement", "certification", "degree",
+        "programming", "language", "framework", "tool", "technology",
+        "python", "java", "javascript", "react", "angular", "node",
+        "database", "sql", "mongodb", "aws", "azure", "docker",
+        "who has", "who knows", "find someone", "candidate with",
+        "years of experience", "expertise in", "proficient in"
+    ]
+    
+    if any(keyword in query_lower for keyword in cv_keywords):
+        return 'cv_analysis'
+    
+    # Default to CV analysis if unclear (lean towards core functionality)
+    return 'cv_analysis'
+
+def _get_pagie_info_response() -> Dict[str, Any]:
+    """Return information about PAGie itself."""
+    response_text = """
+**Summary:** I'm PAGie (Personal AI Generation & Information Engine), a specialized CV analysis assistant developed by CADT Group 5 for their Data Science project.
+
+**Details:**
+- I'm designed to help you analyze and search through CV/resume databases using advanced RAG (Retrieval-Augmented Generation) technology
+- My knowledge base consists of CV files synced from Google Drive, processed using Data Science techniques like EDA and IQR filtering
+- I use Google Gemini 3.0 AI and ChromaDB vector database to provide accurate, context-aware responses about candidates
+- I can help you find candidates with specific skills, compare qualifications, analyze experience levels, and answer detailed questions about professional backgrounds
+
+**My Capabilities:**
+- 🔍 **CV Search & Analysis**: Find candidates by skills, experience, education, or any criteria
+- 📊 **Candidate Comparison**: Compare multiple candidates side-by-side
+- 🎯 **Skill Matching**: Identify candidates with specific technical or professional skills
+- 📈 **Experience Analysis**: Analyze years of experience, career progression, and achievements
+- 🔄 **Real-time Updates**: Access the latest CV data through automated sync processes
+
+**How to Use Me:**
+Ask me questions like:
+- "Who has Python programming experience?"
+- "Find candidates with 5+ years in web development"
+- "Compare the backgrounds of John and Jane"
+- "Who has worked with React and Node.js?"
+
+I'm focused exclusively on CV analysis and candidate information. For other topics, please consult general AI assistants.
+"""
+    
+    return {
+        "answer": response_text,
+        "sources": []
+    }
+
+def _get_out_of_scope_response() -> Dict[str, Any]:
+    """Return a polite redirection for out-of-scope questions."""
+    response_text = """
+I'm PAGie, a specialized CV analysis assistant designed to help with **candidate and resume analysis only**.
+
+I focus exclusively on answering questions about:
+- 📄 CV/Resume content and candidate backgrounds
+- 🔍 Skill searches and candidate matching  
+- 📊 Experience analysis and qualifications
+- 👥 Candidate comparisons and recommendations
+
+For general questions outside of CV analysis, I'd recommend using a general-purpose AI assistant. 
+
+**How can I help you with candidate analysis today?** Try asking:
+- "Who has experience with [specific technology]?"
+- "Find candidates with [number] years of experience in [field]"
+- "Compare candidates' backgrounds in [area]"
+"""
+    
+    return {
+        "answer": response_text,
+        "sources": []
+    }
+
+
+
 def _is_intro_query(query: str) -> bool:
     """Detect if query is asking for general introduction/overview."""
     intro_keywords = [
@@ -332,33 +442,37 @@ def _assemble_context(docs: List[Document]) -> str:
 # Enhanced Prompt Engineering
 # ---------------------------------------------------------------------------
 def _build_enhanced_prompt() -> str:
-    """Build structured system prompt for accurate CV analysis."""
-    return """You are PAGie, an expert CV analysis assistant with access to a database of professional profiles and resumes.
+    """Build conversational system prompt for intelligent CV analysis."""
+    return """You are PAGie, a smart and conversational AI assistant specializing in CV and professional profile analysis. You have access to a comprehensive database of resumes and professional information.
 
-CORE PRINCIPLES:
-• Answer ONLY based on the provided CV data - never fabricate information
-• If information is unavailable, explicitly state "This information is not available in the provided CV data"
-• Always cite your sources using the [Source: filename] references
-• Use third-person references (e.g., "John has experience with..." not "you have experience")
-• Be concise but comprehensive - provide specific details when available
+CONVERSATION STYLE:
+• Respond naturally and conversationally - you're having a discussion, not generating a report
+• Use first-person when discussing someone's background ("I have 5 years of Python experience" when asked about yourself)
+• Use natural names when discussing other candidates ("Sarah has strong machine learning skills")
+• Adapt your tone to match the question - casual for exploratory questions, detailed for technical queries
+• Maintain professional friendliness while being informative
 
-RESPONSE FORMAT:
-**Summary:** [2-3 sentence overview directly answering the question]
-**Details:** 
-- [Specific fact/skill with source citation]
-- [Another relevant detail with source citation]  
-- [Additional context if available]
+RESPONSE APPROACH:
+• Let the conversation flow naturally - don't force every answer into the same format
+• For simple questions, give direct conversational answers
+• For complex questions, organize your thoughts clearly but naturally
+• When comparing people, tell a story rather than listing bullet points
+• Include specific examples and details when they help illustrate your points
 
-**Sources:** [List the CV files referenced]
+ACCURACY & CITATIONS:
+• Base all responses strictly on the provided CV data - never invent information
+• DO NOT include inline source citations in your responses - sources will be displayed automatically below
+• When information isn't available, say it naturally: "I don't see that in their profile" or "That's not mentioned in the documents I have"
+• Be specific with numbers, dates, technologies, and achievements when available
 
-QUALITY STANDARDS:
-• Prioritize recent and relevant information
-• Include specific skills, experience years, technologies, and achievements when mentioned
-• For comparison questions, present facts side-by-side without personal opinions
-• If multiple candidates match criteria, mention all relevant ones
-• Distinguish between skills (technical abilities) and experience (work history)
+INTELLIGENCE & HELPFULNESS:
+• Synthesize information across multiple sources when relevant
+• Provide context and explain the significance of skills or experiences
+• Anticipate follow-up questions and address them proactively
+• For technical roles, explain both what someone has done and what it means for their capabilities
+• Help users understand not just the facts, but their implications
 
-Remember: Professional accuracy over creativity - stick to the facts in the CV data."""
+Remember: You're an intelligent assistant helping someone understand professional profiles - be conversational, accurate, and genuinely helpful. Sources will be shown separately below your response."""
 
 # ---------------------------------------------------------------------------
 # Core RAG Function with Enhanced Accuracy
@@ -384,13 +498,45 @@ def _normalize_llm_text(content: Any) -> str:
     else:
         return str(content).strip()
 
-def query_pagie(user_question: str, k: int = 8) -> Dict[str, Any]:
+def _format_chat_history(chat_history: List[Dict[str, str]]) -> str:
+    """Format chat history for context-aware responses."""
+    if not chat_history:
+        return ""
+    
+    # Only include recent conversation (last 4 exchanges to avoid token overflow)
+    recent_history = chat_history[-8:]  # 4 user + 4 assistant messages
+    
+    formatted_turns = []
+    for turn in recent_history:
+        role = turn.get("role", "").lower()
+        content = turn.get("content", "").strip()
+        
+        if role == "user" and content:
+            formatted_turns.append(f"User asked: {content}")
+        elif role == "assistant" and content:
+            # Shorten previous responses to key points only
+            shortened = content[:200] + "..." if len(content) > 200 else content
+            formatted_turns.append(f"I responded: {shortened}")
+    
+    if formatted_turns:
+        return f"""
+<conversation_context>
+Previous conversation:
+{chr(10).join(formatted_turns)}
+</conversation_context>
+
+"""
+    return ""
+
+def query_pagie(user_question: str, k: int = 8, chat_history: List[Dict[str, str]] = None) -> Dict[str, Any]:
     """
     Enhanced RAG function combining performance optimizations with intelligent retrieval.
     
     Args:
         user_question (str): The natural language question.
         k (int): Number of context chunks to retrieve.
+        chat_history (List[Dict[str, str]]): Previous conversation turns for context.
+                     Expected format: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
     
     Returns:
         dict: {"answer": str, "sources": list}
@@ -399,11 +545,24 @@ def query_pagie(user_question: str, k: int = 8) -> Dict[str, Any]:
         start_time = time.time()
         logger.info(f"Processing query: {user_question}")
         
-        # Step 1: Query enhancement with CV-specific keywords
+        # Step 1: Query intent classification
+        intent = _classify_query_intent(user_question)
+        logger.info(f"Query intent classified as: {intent}")
+        
+        # Handle non-CV queries early without RAG processing
+        if intent == 'pagie_info':
+            logger.info("Responding with PAGie information")
+            return _get_pagie_info_response()
+        elif intent == 'out_of_scope':
+            logger.info("Query out of scope, providing redirection")
+            return _get_out_of_scope_response()
+        
+        # Continue with CV analysis for 'cv_analysis' intent
+        # Step 2: Query enhancement with CV-specific keywords
         enhanced_query = _rewrite_query_with_cv_keywords(user_question)
         logger.info(f"Enhanced query: {enhanced_query}")
         
-        # Step 2: Fast embedding with caching
+        # Step 3: Fast embedding with caching
         cached_embedding = _get_cached_embedding(enhanced_query)
         if cached_embedding is not None:
             query_embedding = cached_embedding
@@ -415,7 +574,7 @@ def query_pagie(user_question: str, k: int = 8) -> Dict[str, Any]:
             embed_time = time.time() - embed_start
             logger.debug(f"Query embedded in {embed_time:.3f}s")
         
-        # Step 3: Intelligent retrieval with diversity selection
+        # Step 4: Intelligent retrieval with diversity selection
         vector_db = _get_vector_db()
         
         # Calculate retrieval parameters
@@ -434,16 +593,16 @@ def query_pagie(user_question: str, k: int = 8) -> Dict[str, Any]:
         context_length = len(context_text)
         logger.debug(f"Context assembled: {context_length} chars")
         
-        # Step 5: Enhanced prompt construction
+        # Step 5: Enhanced prompt construction with conversation context
         system_prompt = _build_enhanced_prompt()
-        task_prompt = f"""
-<context>
+        conversation_context = _format_chat_history(chat_history)
+        task_prompt = f"""{conversation_context}<context>
 {context_text}
 </context>
 
 <task>
-Question: {user_question}
-Analyze the CV data above and provide a structured answer following the specified format.
+Current question: {user_question}
+Use the CV data above and any relevant conversation context to provide a natural, conversational response.
 </task>
 """
         
@@ -492,9 +651,11 @@ Analyze the CV data above and provide a structured answer following the specifie
         # Step 7: Response normalization and source extraction
         answer_text = _normalize_llm_text(response)
         
-        # Extract unique sources with stable ordering
+        # Extract sources from the documents that were actually used for the response
         sources = []
         seen_sources = set()
+        
+        # Use the selected documents as sources (no more inline citations)
         for doc in selected_docs:
             source = doc.metadata.get('source', 'unknown')
             source_name = Path(source).name if source != 'unknown' else 'unknown'
@@ -503,7 +664,7 @@ Analyze the CV data above and provide a structured answer following the specifie
                 seen_sources.add(source_name)
         
         total_time = time.time() - start_time
-        logger.info(f"Query completed in {total_time:.3f}s (LLM: {llm_time:.3f}s, {len(sources)} sources)")
+        logger.info(f"Query completed in {total_time:.3f}s (LLM: {llm_time:.3f}s, {len(sources)} sources used)")
         
         return {"answer": answer_text, "sources": sources}
     
@@ -544,6 +705,40 @@ def get_cache_stats() -> Dict[str, Any]:
         "hit_rate": _cache_hits / (_cache_hits + _cache_misses) if (_cache_hits + _cache_misses) > 0 else 0,
         "cached_queries": len(_embedding_cache)
     }
+
+def get_db_stats() -> Dict[str, Any]:
+    """
+    Get database and LLM statistics for the Streamlit UI sidebar.
+    Returns app mode, LLM provider/model, and vector DB stats.
+    """
+    try:
+        db = _get_vector_db()
+        total_chunks = db._collection.count() if hasattr(db, '_collection') else 0
+        
+        # Determine LLM provider and model based on app mode
+        if APP_MODE == "prod":
+            llm_provider = "gemini"
+            llm_model = GEMINI_MODEL
+        else:  # dev mode
+            llm_provider = LOCAL_LLM_PROVIDER
+            llm_model = LOCAL_LLM_MODEL
+        
+        return {
+            "status": f"Connected ({total_chunks} chunks)",
+            "total_chunks": total_chunks,
+            "app_mode": APP_MODE,
+            "llm_provider": llm_provider,
+            "llm_model": llm_model
+        }
+    except Exception as e:
+        logger.error(f"Error getting DB stats: {e}")
+        return {
+            "status": f"Error: {str(e)[:50]}",
+            "total_chunks": "N/A",
+            "app_mode": APP_MODE,
+            "llm_provider": "gemini" if APP_MODE == "prod" else LOCAL_LLM_PROVIDER,
+            "llm_model": GEMINI_MODEL if APP_MODE == "prod" else LOCAL_LLM_MODEL
+        }
 
 # ---------------------------------------------------------------------------
 # Backward Compatibility
