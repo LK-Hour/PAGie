@@ -20,7 +20,13 @@ from pathlib import Path
 from typing import Any, List, Dict, Optional, Tuple
 
 import numpy as np
-from dotenv import load_dotenv
+# Environment management - optional for Streamlit Cloud
+try:
+    from dotenv import load_dotenv
+    _dotenv_available = True
+except ImportError:
+    # On Streamlit Cloud, dotenv is not needed (uses st.secrets instead)
+    _dotenv_available = False
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
@@ -42,7 +48,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # ---------------------------------------------------------------------------
 # Load environment variables and validate required keys
 # ---------------------------------------------------------------------------
-load_dotenv()
+if _dotenv_available:
+    load_dotenv()
 
 # Support both Streamlit secrets (for cloud deployment) and .env (for local)
 try:

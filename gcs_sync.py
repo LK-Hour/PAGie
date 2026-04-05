@@ -33,11 +33,19 @@ import tempfile
 from pathlib import Path
 from typing import Optional, Dict, List
 
-from dotenv import load_dotenv
+# Environment management - optional for Streamlit Cloud
+try:
+    from dotenv import load_dotenv
+    _dotenv_available = True
+except ImportError:
+    # On Streamlit Cloud, dotenv is not needed (uses st.secrets instead)
+    _dotenv_available = False
+
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-# Load environment variables
-load_dotenv()
+# Load environment variables (only if dotenv is available)
+if _dotenv_available:
+    load_dotenv()
 
 # Support both Streamlit secrets (cloud) and .env (local)
 try:

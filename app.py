@@ -16,7 +16,13 @@ Usage:
   streamlit run app_modular.py
 """
 
-from dotenv import load_dotenv
+# Environment management - optional for Streamlit Cloud
+try:
+    from dotenv import load_dotenv
+    _dotenv_available = True
+except ImportError:
+    # On Streamlit Cloud, dotenv is not needed (uses st.secrets instead)
+    _dotenv_available = False
 
 # Import modular UI components
 from ui import (
@@ -33,8 +39,9 @@ import streamlit as st
 # Import GCS sync for cloud deployment
 from gcs_sync import ensure_chromadb_synced
 
-# Load environment variables
-load_dotenv()
+# Load environment variables (only if dotenv is available)
+if _dotenv_available:
+    load_dotenv()
 
 # ---------------------------------------------------------------------------
 # App Initialization
