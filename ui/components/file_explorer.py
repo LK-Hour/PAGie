@@ -11,8 +11,14 @@ import os
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any
-import pypdf
 import io
+
+# Optional PDF support - graceful fallback if not available
+try:
+    import pypdf
+    _pdf_support = True
+except ImportError:
+    _pdf_support = False
 
 def render_file_explorer() -> None:
     """Render the file explorer section in the sidebar."""
@@ -180,6 +186,10 @@ def render_file_viewer() -> None:
 
 def _extract_pdf_text(file_path: Path) -> str:
     """Extract text content from PDF file."""
+    # Check if PDF support is available
+    if not _pdf_support:
+        return "PDF text extraction is not available in this deployment.\n\nYou can download the PDF file to view it locally."
+    
     try:
         text_content = []
         
