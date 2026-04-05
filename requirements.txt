@@ -1,0 +1,58 @@
+# ==============================================================================
+# PAGie — Python Dependencies
+# ==============================================================================
+# Install all dependencies with:
+#   pip install -r requirements.txt
+# ==============================================================================
+
+# --- LangChain Orchestration (pinned versions for Streamlit Cloud) ---
+langchain==1.2.10
+langchain-core==1.2.18
+langchain-google-genai==4.2.1
+langchain-chroma==1.1.0
+langchain-community==0.4.1
+langchain-huggingface==1.2.1
+langchain-ollama==1.0.1
+
+# --- LLM & Embeddings (Google Gemini) ---
+google-generativeai==0.8.6
+
+# --- Vector Database ---
+chromadb==1.5.5
+
+# --- Data Ingestion (Google Drive & Notion) ---
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+requests
+
+# --- PDF Support ---
+pypdf
+
+# --- OCR Support (for image-based PDFs) ---
+# Note: pytesseract and pdf2image require system dependencies (tesseract-ocr, poppler)
+# that are not available on Streamlit Cloud by default
+# pytesseract
+# pdf2image
+pillow
+
+# --- Data Science & EDA ---
+pandas
+numpy
+matplotlib
+seaborn
+
+# --- Frontend UI ---
+streamlit==1.55.0
+
+# --- Scheduling (nightly ETL) ---
+schedule
+
+# --- Environment Management ---
+python-dotenv
+
+# --- Google Cloud Storage (for deployment) ---
+google-cloud-storage
+
+# --- Retry Logic ---
+tenacity==9.1.4
