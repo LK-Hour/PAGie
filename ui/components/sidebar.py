@@ -34,10 +34,10 @@ def render_sidebar() -> None:
         _render_footer()
 
 def _render_header() -> None:
-    """Render sidebar header with high-quality logo."""
+    """Render sidebar header with compact logo."""
     st.markdown(f"""
         <div style="
-            padding: 0rem 0.5rem 1rem 0rem;
+            padding: 0.5rem 0;
             text-align: center;
         ">
             <div style="
@@ -47,27 +47,27 @@ def _render_header() -> None:
                 justify-content: center;
             ">
                 <img src="data:image/png;base64,{_get_profile_logo_base64()}" 
-                     style="width: 480px; height: auto;">
+                     style="width: 120px; height: auto; margin-bottom: 0.5rem;">
                 <h2 style="
                     margin: 0;
                     color: {ColorTheme.PRIMARY_COLOR};
-                    font-size: 1.8rem;
+                    font-size: 1.4rem;
                     font-weight: 700;
                     letter-spacing: 0.02em;
                 ">PAGie</h2>
             </div>
             <p style="
-                margin: 0 0 0.5rem 0;
+                margin: 0.25rem 0 0 0;
                 color: #94a3b8;
-                font-size: 0.85rem;
+                font-size: 0.75rem;
                 font-weight: 400;
             ">Second Brain AI</p>
             <p style="
                 margin: 0;
                 color: #64748b;
-                font-size: 0.75rem;
-                font-weight: 800;
-            ">CADT · Group 5 · Data Science Project</p>
+                font-size: 0.7rem;
+                font-weight: 600;
+            ">CADT · Group 5</p>
         </div>
     """, unsafe_allow_html=True)
     st.divider()
@@ -103,7 +103,7 @@ def _get_icon_base64() -> str:
 
 def _render_system_status() -> None:
     """Render system status section with clean card design."""
-    st.markdown("### :material/router: System Status")
+    st.markdown("#### :material/router: System")
     
     try:
         # Import here to avoid circular imports
@@ -120,23 +120,23 @@ def _render_system_status() -> None:
         
         # Simple status display
         st.markdown(f"{status_icon} **Vector DB:** {stats.get('status', 'Unknown')}")
-        st.caption(f"Mode: {stats.get('app_mode', 'unknown')} · LLM: {stats.get('llm_provider', 'n/a')} ({stats.get('llm_model', 'n/a')})")
+        st.caption(f"Mode: {stats.get('app_mode', 'unknown')} · {stats.get('llm_provider', 'n/a')}")
         
-        # Metrics
+        # Metrics in compact layout
         col1, col2 = st.columns(2)
-        col1.metric("Chunks", stats.get("total_chunks", "N/A"), help="Total text chunks in vector database")
+        col1.metric("Chunks", stats.get("total_chunks", "N/A"))
         
         cache_stats = get_cache_stats()
         hit_rate = cache_stats.get("hit_rate", 0) * 100
-        col2.metric("Cache Hit", f"{hit_rate:.1f}%", help="Embedding cache performance")
+        col2.metric("Cache", f"{hit_rate:.0f}%")
         
     except Exception as e:
-        st.error(f"Error connecting to Vector DB: {str(e)[:50]}")
+        st.error(f"DB Error: {str(e)[:30]}...")
         col1, col2 = st.columns(2)
         col1.metric("Chunks", "N/A")
-        col2.metric("Cache Hit", "N/A")
+        col2.metric("Cache", "N/A")
 
-    # Display last sync timestamp
+    # Display last sync timestamp (compact)
     _render_sync_status()
     st.divider()
 
@@ -159,39 +159,39 @@ def _render_sync_status() -> None:
 
 def _render_action_buttons() -> None:
     """Render action buttons section."""
-    st.markdown("### :material/settings: Actions")
+    st.markdown("#### :material/settings: Actions")
 
     # Sync CV Files button
-    if st.button(":material/sync: Sync CV Files", 
+    if st.button(":material/sync: Sync Files", 
                  use_container_width=True, 
-                 help="Fetch latest CV files from Google Drive folder"):
-        with st.spinner("Connecting to Google Drive..."):
+                 help="Fetch latest CV files from Google Drive"):
+        with st.spinner("Syncing..."):
             try:
                 from sync_data import run_sync
                 run_sync()
                 st.success("Sync complete!")
                 st.rerun()
             except Exception as e:
-                st.error(f"Sync failed: {e}")
+                st.error(f"Failed: {e}")
 
     # Rebuild Knowledge Base button
-    if st.button(":material/science: Rebuild Knowledge Base", 
+    if st.button(":material/science: Rebuild KB", 
                  use_container_width=True, 
-                 help="Re-process CV files: chunk → IQR filter → embed → store"):
-        with st.spinner("Running Data Science pipeline (this may take a minute)..."):
+                 help="Re-process CV files"):
+        with st.spinner("Processing..."):
             try:
                 from docs.data_science_eda import run_pipeline
                 df, _ = run_pipeline()
                 if df is not None:
-                    st.success(f"Done! {len(df)} clean CV chunks indexed.")
+                    st.success(f"Done! {len(df)} chunks.")
                     st.rerun()
                 else:
-                    st.warning("No CV files found. Sync first.")
+                    st.warning("No files. Sync first.")
             except Exception as e:
-                st.error(f"Pipeline failed: {e}")
+                st.error(f"Failed: {e}")
 
     # Clear Chat History button
-    if st.button(":material/delete: Clear Chat History", use_container_width=True):
+    if st.button(":material/delete: Clear Chat", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
@@ -199,21 +199,21 @@ def _render_action_buttons() -> None:
 
 def _render_eda_report() -> None:
     """Render EDA report viewer section."""
-    st.markdown("### :material/analytics: EDA Report")
+    st.markdown("#### :material/analytics: EDA")
     eda_path = Path("./assets/eda_report.png")
     
     if eda_path.exists():
         st.image(
             str(eda_path),
             use_container_width=True,
-            caption="Latest IQR filtering & data distribution analysis",
+            caption="IQR filtering analysis",
         )
-        # Show when the EDA was last generated
+        # Show when the EDA was last generated (compact)
         import os
         mtime = os.path.getmtime(eda_path)
-        st.caption(f"Generated: {datetime.fromtimestamp(mtime).strftime('%b %d %Y, %H:%M')}")
+        st.caption(f"Generated: {datetime.fromtimestamp(mtime).strftime('%b %d, %H:%M')}")
     else:
-        st.info("No EDA report yet.\nClick 'Rebuild Knowledge Base' to generate one.")
+        st.info("No EDA report. Rebuild KB to generate.")
 
     st.divider()
 
