@@ -67,7 +67,7 @@ else:
     # Auto-detect environment
     try:
         import streamlit as st
-        if hasattr(st, 'secrets'):
+        if os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD") == "true":
             # On Streamlit Cloud, use /tmp (writable)
             ASSETS_DIR = Path("/tmp/assets")
             CHROMA_DB_DIR = "/tmp/chroma_db"
@@ -664,7 +664,16 @@ def embed_and_store(df_filtered: pd.DataFrame, all_chunks: list) -> Chroma:
         # Optional hard reset to avoid duplicate / stale vectors between rebuilds.
         if RESET_CHROMA_ON_REBUILD and Path(CHROMA_DB_DIR).exists():
             logger.info("RESET_CHROMA_ON_REBUILD=true → removing previous chroma_db before re-embedding...")
+            
+            # Clear ChromaDB's internal client cache so we don't hold a stale SQLite connection
+            try:
+                import chromadb
+                chromadb.api.client.SharedSystemClient.clear_system_cache()
+            except Exception as e:
+                logger.warning(f"Could not clear Chroma cache: {e}")
+                
             shutil.rmtree(CHROMA_DB_DIR, ignore_errors=True)
+            Path(CHROMA_DB_DIR).mkdir(parents=True, exist_ok=True)
 
         # Local embeddings — runs on CPU, no API key or quota required.
         # The model is downloaded once (~80 MB) and cached automatically.

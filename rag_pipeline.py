@@ -79,7 +79,7 @@ else:
     # Auto-detect environment
     try:
         import streamlit as st
-        if hasattr(st, 'secrets'):
+        if os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD") == "true":
             # On Streamlit Cloud, use /tmp (writable)
             CHROMA_DB_PATH = "/tmp/chroma_db"
         else:
@@ -103,7 +103,7 @@ else:
     # Auto-detect environment
     try:
         import streamlit as st
-        if hasattr(st, 'secrets'):
+        if os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD") == "true":
             EMBEDDING_CACHE_PATH = "/tmp/cache/embeddings_v2.pkl"
         else:
             EMBEDDING_CACHE_PATH = "./cache/embeddings_v2.pkl"
@@ -191,7 +191,7 @@ def _build_chat_model(provider: str):
         # Check if running on Streamlit Cloud (no localhost access)
         try:
             import streamlit as st
-            if hasattr(st, 'secrets'):
+            if os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD") == "true":
                 logger.warning("Ollama not available on Streamlit Cloud, falling back to Gemini")
                 # Fall back to Gemini on cloud deployment
                 if not GOOGLE_API_KEY:

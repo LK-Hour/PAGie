@@ -38,7 +38,6 @@ def _render_header() -> None:
     """Render sidebar header with compact logo."""
     st.markdown(f"""
         <div style="
-            padding: 0.5rem 0;
             text-align: center;
         ">
             <div style="
@@ -48,7 +47,7 @@ def _render_header() -> None:
                 justify-content: center;
             ">
                 <img src="data:image/png;base64,{_get_profile_logo_base64()}" 
-                     style="width: 120px; height: auto; margin-bottom: 0.5rem;">
+                     style="width: 240px; height: auto; margin-bottom: 0.5rem;">
                 <h2 style="
                     margin: 0;
                     color: {ColorTheme.PRIMARY_COLOR};
@@ -105,7 +104,7 @@ def _render_system_status() -> None:
         
         # Simple status display
         st.markdown(f"{status_icon} **Vector DB:** {stats.get('status', 'Unknown')}")
-        st.caption(f"Mode: {stats.get('app_mode', 'unknown')} · {stats.get('llm_provider', 'n/a')}")
+        st.caption(f"Mode: {stats.get('app_mode', 'unknown')} · {stats.get('llm_model', 'n/a')}")
         
         # Metrics in compact layout
         col1, col2 = st.columns(2)
@@ -171,6 +170,12 @@ def _render_action_buttons() -> None:
         with st.spinner("Processing CVs and building ChromaDB..."):
             try:
                 from data_science_eda import run_pipeline
+                import rag_pipeline
+                
+                # First explicitly free the Database connection 
+                # so data_science_eda.py can safely delete and recreate it.
+                rag_pipeline._vector_db_instance = None
+                
                 df, _ = run_pipeline()
                 if df is not None:
                     st.success(f"✅ Done! Processed {len(df)} text chunks.")

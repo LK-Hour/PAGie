@@ -153,16 +153,18 @@ def get_google_drive_service():
         RuntimeError: If running on Streamlit Cloud where sync is not available.
     """
     # Check if running on Streamlit Cloud
-    try:
-        import streamlit as st
-        if hasattr(st, 'secrets'):
-            # Running on Streamlit Cloud - sync not available
-            raise RuntimeError(
-                "Google Drive sync is not available on Streamlit Cloud. "
-                "For cloud deployment, pre-upload CV files to the repository or use GCS sync."
-            )
-    except (ImportError, AttributeError):
-        pass  # Not on Streamlit, continue with normal auth
+    force_local_mode = os.getenv("FORCE_LOCAL_MODE", "false").lower() == "true"
+    if not force_local_mode:
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                # Running on Streamlit Cloud - sync not available
+                raise RuntimeError(
+                    "Google Drive sync is not available on Streamlit Cloud. "
+                    "For cloud deployment, pre-upload CV files to the repository or use GCS sync."
+                )
+        except (ImportError, AttributeError):
+            pass  # Not on Streamlit, continue with normal auth
     
     creds = None
 

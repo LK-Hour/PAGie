@@ -43,6 +43,30 @@ import streamlit as st
 load_dotenv()
 
 # ---------------------------------------------------------------------------
+# Debug: Print actual paths being used
+# ---------------------------------------------------------------------------
+print("\n" + "="*70)
+print("🏠 PAGie Local Mode - Path Configuration")
+print("="*70)
+
+from rag_pipeline import CHROMA_DB_PATH, EMBEDDING_CACHE_PATH
+from data_science_eda import CHROMA_DB_DIR, ASSETS_DIR
+
+print(f"FORCE_LOCAL_MODE:     {os.environ.get('FORCE_LOCAL_MODE', 'NOT SET')}")
+print(f"ChromaDB (rag):       {CHROMA_DB_PATH}")
+print(f"ChromaDB (eda):       {CHROMA_DB_DIR}")
+print(f"Embedding Cache:      {EMBEDDING_CACHE_PATH}")
+print(f"Assets:               {ASSETS_DIR}")
+
+if str(CHROMA_DB_PATH).startswith('/tmp'):
+    print("\n⚠️  WARNING: Using /tmp paths! This should be local!")
+    print("   If you see this, please report it as a bug.")
+else:
+    print("\n✅ Using local paths (correct)")
+
+print("="*70 + "\n")
+
+# ---------------------------------------------------------------------------
 # App Initialization
 # ---------------------------------------------------------------------------
 
