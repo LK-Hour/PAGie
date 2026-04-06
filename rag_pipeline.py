@@ -85,7 +85,17 @@ MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "5000"))     # Balanced c
 
 # Performance settings - Enhanced caching
 ENABLE_EMBEDDING_CACHE = True
-EMBEDDING_CACHE_PATH = "./cache/embeddings_v2.pkl"
+
+# Use writable cache directory on Streamlit Cloud
+try:
+    import streamlit as st
+    if hasattr(st, 'secrets'):
+        EMBEDDING_CACHE_PATH = "/tmp/cache/embeddings_v2.pkl"
+    else:
+        EMBEDDING_CACHE_PATH = "./cache/embeddings_v2.pkl"
+except (ImportError, AttributeError):
+    EMBEDDING_CACHE_PATH = "./cache/embeddings_v2.pkl"
+
 CACHE_AUTO_SAVE_INTERVAL = 5  # Save every 5 new embeddings
 CACHE_VERSION = "v2.0"  # For cache invalidation
 

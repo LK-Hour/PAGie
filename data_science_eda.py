@@ -54,17 +54,19 @@ load_dotenv()
 # Configuration
 # ---------------------------------------------------------------------------
 DATA_DIR = Path("./data")
-ASSETS_DIR = Path("./assets")
 
-# ChromaDB Path - Use writable directory on Streamlit Cloud
+# Use writable directories on Streamlit Cloud
 try:
     import streamlit as st
     if hasattr(st, 'secrets'):
         # On Streamlit Cloud, use /tmp (writable)
+        ASSETS_DIR = Path("/tmp/assets")
         CHROMA_DB_DIR = "/tmp/chroma_db"
     else:
+        ASSETS_DIR = Path("./assets")
         CHROMA_DB_DIR = "./chroma_db"
 except (ImportError, AttributeError):
+    ASSETS_DIR = Path("./assets")
     CHROMA_DB_DIR = "./chroma_db"
 
 # Optional ingestion hygiene controls (comma-separated globs / regex-lite substrings)
