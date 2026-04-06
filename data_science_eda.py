@@ -90,8 +90,9 @@ CHECKPOINT_FILE = DATA_DIR / "embed_checkpoint.json"
 # Downloaded automatically on first run and cached in ~/.cache/huggingface/
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-# Ensure output directories exist.
-ASSETS_DIR.mkdir(exist_ok=True)
+# Ensure output directories exist (especially important for /tmp on Streamlit Cloud)
+ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+Path(CHROMA_DB_DIR).mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # Logging Setup
