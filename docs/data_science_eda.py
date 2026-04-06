@@ -35,9 +35,16 @@ from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# OCR imports for image-based PDFs
-import pytesseract
-from pdf2image import convert_from_path
+# OCR imports for image-based PDFs - optional for cloud deployment
+try:
+    import pytesseract
+    from pdf2image import convert_from_path
+    _ocr_available = True
+except ImportError:
+    _ocr_available = False
+    pytesseract = None
+    convert_from_path = None
+
 from PIL import Image
 
 # Load API keys from .env — required for embedding model.
@@ -208,6 +215,11 @@ def load_pdf_with_ocr(pdf_path: Path) -> list:
             return pdf_docs
         else:
             logger.info(f"  🖼️  Insufficient text found in {pdf_path.name}, attempting OCR...")
+            
+            # Check if OCR is available
+            if not _ocr_available:
+                logger.warning(f"  ⚠️  OCR not available (pytesseract/pdf2image not installed). Skipping {pdf_path.name}")
+                return pdf_docs  # Return what we have, even if minimal
             
             # Step 2: Use OCR for image-based PDFs
             try:

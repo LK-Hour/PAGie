@@ -142,13 +142,28 @@ def get_google_drive_service():
 
     On first run, this opens a browser window for the user to grant permission.
     The resulting token is saved to token.json so subsequent runs are silent.
+    
+    On Streamlit Cloud, this function will raise an error since sync requires local auth.
 
     Returns:
         A Google Drive API service object ready to make requests.
 
     Raises:
         FileNotFoundError: If no client_secret_*.json file exists in the project root.
+        RuntimeError: If running on Streamlit Cloud where sync is not available.
     """
+    # Check if running on Streamlit Cloud
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets'):
+            # Running on Streamlit Cloud - sync not available
+            raise RuntimeError(
+                "Google Drive sync is not available on Streamlit Cloud. "
+                "For cloud deployment, pre-upload CV files to the repository or use GCS sync."
+            )
+    except (ImportError, AttributeError):
+        pass  # Not on Streamlit, continue with normal auth
+    
     creds = None
 
     # Attempt to load a previously saved OAuth token to avoid re-authentication.

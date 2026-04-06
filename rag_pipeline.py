@@ -152,6 +152,24 @@ def _build_chat_model(provider: str):
     if provider == "ollama":
         if ChatOllama is None:
             raise ImportError("langchain-ollama is not installed. Install it via requirements.txt")
+        
+        # Check if running on Streamlit Cloud (no localhost access)
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                logger.warning("Ollama not available on Streamlit Cloud, falling back to Gemini")
+                # Fall back to Gemini on cloud deployment
+                if not GOOGLE_API_KEY:
+                    raise ValueError("GOOGLE_API_KEY required for cloud deployment")
+                return ChatGoogleGenerativeAI(
+                    model=GEMINI_MODEL,
+                    google_api_key=GOOGLE_API_KEY,
+                    temperature=0.6,
+                    max_tokens=1500,
+                )
+        except (ImportError, AttributeError):
+            pass
+        
         logger.info(f"Using local Ollama model: {LOCAL_LLM_MODEL} @ {OLLAMA_BASE_URL}")
         return ChatOllama(
             model=LOCAL_LLM_MODEL,
