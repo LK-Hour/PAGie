@@ -56,18 +56,27 @@ load_dotenv()
 DATA_DIR = Path("./data")
 
 # Use writable directories on Streamlit Cloud
-try:
-    import streamlit as st
-    if hasattr(st, 'secrets'):
-        # On Streamlit Cloud, use /tmp (writable)
-        ASSETS_DIR = Path("/tmp/assets")
-        CHROMA_DB_DIR = "/tmp/chroma_db"
-    else:
-        ASSETS_DIR = Path("./assets")
-        CHROMA_DB_DIR = "./chroma_db"
-except (ImportError, AttributeError):
+# FORCE_LOCAL_MODE=true forces local paths even when Streamlit is detected
+FORCE_LOCAL_MODE = os.getenv("FORCE_LOCAL_MODE", "false").lower() == "true"
+
+if FORCE_LOCAL_MODE:
+    # Force local paths (for app_local.py)
     ASSETS_DIR = Path("./assets")
     CHROMA_DB_DIR = "./chroma_db"
+else:
+    # Auto-detect environment
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets'):
+            # On Streamlit Cloud, use /tmp (writable)
+            ASSETS_DIR = Path("/tmp/assets")
+            CHROMA_DB_DIR = "/tmp/chroma_db"
+        else:
+            ASSETS_DIR = Path("./assets")
+            CHROMA_DB_DIR = "./chroma_db"
+    except (ImportError, AttributeError):
+        ASSETS_DIR = Path("./assets")
+        CHROMA_DB_DIR = "./chroma_db"
 
 # Optional ingestion hygiene controls (comma-separated globs / regex-lite substrings)
 EXCLUDE_SOURCE_PATTERNS = [p.strip().lower() for p in os.getenv("EXCLUDE_SOURCE_PATTERNS", "").split(",") if p.strip()]

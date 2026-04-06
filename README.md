@@ -33,6 +33,44 @@
 
 ---
 
+## 🏠 Two App Versions: Local vs Cloud
+
+PAGie now has **two separate app versions** for different use cases:
+
+### `app_local.py` - Local Development (Recommended for Development)
+**Use this when:** Running on your local machine
+
+✅ **Features:**
+- Pure local paths (`./chroma_db`, `./cache`, `./assets`)
+- Google Drive OAuth sync (browser authentication)
+- Full Ollama support for local LLM
+- No cloud detection logic (simple, clean code)
+- Fast iteration and testing
+
+```bash
+# Run local version
+streamlit run app_local.py
+```
+
+### `app.py` - Cloud Deployment (For Streamlit Cloud)
+**Use this when:** Deploying to Streamlit Cloud
+
+✅ **Features:**
+- Auto-detects cloud environment
+- Uses `/tmp` paths on cloud (writable)
+- Pre-committed CV files from repository
+- Optional GCS bucket for persistence
+- Automatic Gemini fallback
+
+```bash
+# Deploy this to Streamlit Cloud
+streamlit run app.py
+```
+
+📖 **Full comparison guide:** See [`docs/LOCAL_VS_CLOUD.md`](docs/LOCAL_VS_CLOUD.md)
+
+---
+
 ## 🚀 Runtime Modes (Dev vs Prod)
 
 PAGie supports two runtime modes via `.env`:

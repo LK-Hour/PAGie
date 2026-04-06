@@ -69,15 +69,23 @@ ALLOW_429_FALLBACK_TO_LOCAL = os.getenv("ALLOW_429_FALLBACK_TO_LOCAL", "true").l
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
 # ChromaDB Path - Use writable directory on Streamlit Cloud
-try:
-    import streamlit as st
-    if hasattr(st, 'secrets'):
-        # On Streamlit Cloud, use /tmp (writable)
-        CHROMA_DB_PATH = "/tmp/chroma_db"
-    else:
-        CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
-except (ImportError, AttributeError):
+# FORCE_LOCAL_MODE=true forces local paths even when Streamlit is detected
+FORCE_LOCAL_MODE = os.getenv("FORCE_LOCAL_MODE", "false").lower() == "true"
+
+if FORCE_LOCAL_MODE:
+    # Force local paths (for app_local.py)
     CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
+else:
+    # Auto-detect environment
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets'):
+            # On Streamlit Cloud, use /tmp (writable)
+            CHROMA_DB_PATH = "/tmp/chroma_db"
+        else:
+            CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
+    except (ImportError, AttributeError):
+        CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
 
 RETRIEVAL_MULTIPLIER = int(os.getenv("RETRIEVAL_MULTIPLIER", "3"))  # Fetch k * multiplier candidates
 MAX_CANDIDATES = int(os.getenv("MAX_CANDIDATES", "30"))             # Upper limit for candidates
@@ -87,14 +95,20 @@ MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "5000"))     # Balanced c
 ENABLE_EMBEDDING_CACHE = True
 
 # Use writable cache directory on Streamlit Cloud
-try:
-    import streamlit as st
-    if hasattr(st, 'secrets'):
-        EMBEDDING_CACHE_PATH = "/tmp/cache/embeddings_v2.pkl"
-    else:
-        EMBEDDING_CACHE_PATH = "./cache/embeddings_v2.pkl"
-except (ImportError, AttributeError):
+# FORCE_LOCAL_MODE=true forces local paths even when Streamlit is detected
+if FORCE_LOCAL_MODE:
+    # Force local paths (for app_local.py)
     EMBEDDING_CACHE_PATH = "./cache/embeddings_v2.pkl"
+else:
+    # Auto-detect environment
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets'):
+            EMBEDDING_CACHE_PATH = "/tmp/cache/embeddings_v2.pkl"
+        else:
+            EMBEDDING_CACHE_PATH = "./cache/embeddings_v2.pkl"
+    except (ImportError, AttributeError):
+        EMBEDDING_CACHE_PATH = "./cache/embeddings_v2.pkl"
 
 CACHE_AUTO_SAVE_INTERVAL = 5  # Save every 5 new embeddings
 CACHE_VERSION = "v2.0"  # For cache invalidation
