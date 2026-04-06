@@ -161,18 +161,22 @@ def _render_action_buttons() -> None:
     """Render action buttons section."""
     st.markdown("#### :material/settings: Actions")
 
-    # Sync CV Files button
+    # Sync CV Files button (cloud-aware)
     if st.button(":material/sync: Sync Files", 
                  use_container_width=True, 
-                 help="Fetch latest CV files from Google Drive"):
+                 help="Sync CV files (method adapts to environment)"):
         with st.spinner("Syncing..."):
             try:
-                from sync_data import run_sync
-                run_sync()
-                st.success("Sync complete!")
-                st.rerun()
+                from cloud_sync import sync_cv_files
+                result = sync_cv_files()
+                
+                if result["success"]:
+                    st.success(result["message"])
+                    st.rerun()
+                else:
+                    st.warning(result["message"])
             except Exception as e:
-                st.error(f"Failed: {e}")
+                st.error(f"Sync error: {e}")
 
     # Rebuild Knowledge Base button
     if st.button(":material/science: Rebuild KB", 
@@ -180,7 +184,7 @@ def _render_action_buttons() -> None:
                  help="Re-process CV files"):
         with st.spinner("Processing..."):
             try:
-                from data_science_eda import run_pipeline
+                from docs.data_science_eda import run_pipeline
                 df, _ = run_pipeline()
                 if df is not None:
                     st.success(f"Done! {len(df)} chunks.")

@@ -26,9 +26,17 @@ build/
 .ipynb_checkpoints/
 
 # Data & Ingestion (raw downloaded files)
-/data/
+# EXCEPTION: Keep CV files in data/drive/ for cloud deployment
+!data/
+!data/drive/
+!data/drive/*.pdf
+
+/data/*
+!/data/drive
 /notion_data/
-*.pdf
+
+*.pdf  # Ignore all other PDFs
+!data/drive/*.pdf  # Except CV files
 *.docx
 *.txt
 
