@@ -74,7 +74,6 @@ try:
     if hasattr(st, 'secrets'):
         # On Streamlit Cloud, use /tmp (writable)
         CHROMA_DB_PATH = "/tmp/chroma_db"
-        logger.info("Detected Streamlit Cloud - using /tmp/chroma_db for ChromaDB")
     else:
         CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
 except (ImportError, AttributeError):
