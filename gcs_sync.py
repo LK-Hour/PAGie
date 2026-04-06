@@ -59,7 +59,16 @@ except (ImportError, FileNotFoundError, AttributeError):
     GCS_CREDENTIALS_JSON = os.getenv("GCS_CREDENTIALS_JSON", "")
 
 # Configuration
-CHROMA_DB_PATH = Path(os.getenv("CHROMA_DB_PATH", "./chroma_db"))
+# Use writable directory on Streamlit Cloud
+try:
+    import streamlit as st
+    if hasattr(st, 'secrets'):
+        CHROMA_DB_PATH = Path("/tmp/chroma_db")
+    else:
+        CHROMA_DB_PATH = Path(os.getenv("CHROMA_DB_PATH", "./chroma_db"))
+except (ImportError, AttributeError):
+    CHROMA_DB_PATH = Path(os.getenv("CHROMA_DB_PATH", "./chroma_db"))
+
 GCS_CHROMA_PREFIX = "pagie_chromadb/"  # Folder in GCS bucket
 MANIFEST_FILE = CHROMA_DB_PATH / ".gcs_manifest.json"
 

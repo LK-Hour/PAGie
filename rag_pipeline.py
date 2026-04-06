@@ -67,7 +67,19 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 ALLOW_429_FALLBACK_TO_LOCAL = os.getenv("ALLOW_429_FALLBACK_TO_LOCAL", "true").lower() == "true"
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
+
+# ChromaDB Path - Use writable directory on Streamlit Cloud
+try:
+    import streamlit as st
+    if hasattr(st, 'secrets'):
+        # On Streamlit Cloud, use /tmp (writable)
+        CHROMA_DB_PATH = "/tmp/chroma_db"
+        logger.info("Detected Streamlit Cloud - using /tmp/chroma_db for ChromaDB")
+    else:
+        CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
+except (ImportError, AttributeError):
+    CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
+
 RETRIEVAL_MULTIPLIER = int(os.getenv("RETRIEVAL_MULTIPLIER", "3"))  # Fetch k * multiplier candidates
 MAX_CANDIDATES = int(os.getenv("MAX_CANDIDATES", "30"))             # Upper limit for candidates
 MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "5000"))     # Balanced context size

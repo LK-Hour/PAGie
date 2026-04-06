@@ -187,6 +187,13 @@ def _render_action_buttons() -> None:
                 from data_science_eda import run_pipeline
                 df, _ = run_pipeline()
                 if df is not None:
+                    # Sync to cloud after rebuild (if GCS is enabled)
+                    try:
+                        from gcs_sync import auto_sync_after_update
+                        auto_sync_after_update()
+                    except Exception as sync_err:
+                        st.warning(f"Note: Cloud sync not configured ({sync_err})")
+                    
                     st.success(f"Done! {len(df)} chunks.")
                     st.rerun()
                 else:
