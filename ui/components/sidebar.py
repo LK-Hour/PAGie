@@ -184,7 +184,7 @@ def _render_action_buttons() -> None:
                  help="Re-process CV files"):
         with st.spinner("Processing..."):
             try:
-                from docs.data_science_eda import run_pipeline
+                from data_science_eda import run_pipeline
                 df, _ = run_pipeline()
                 if df is not None:
                     st.success(f"Done! {len(df)} chunks.")
