@@ -323,14 +323,20 @@ def ensure_chromadb_synced():
     For local development:
     - Uses existing ./chroma_db directory
     """
-    # Check if ChromaDB is empty or doesn't exist
-    is_empty = not CHROMA_DB_PATH.exists() or not any(CHROMA_DB_PATH.iterdir())
+    # Check if ChromaDB exists AND is valid (has chroma.sqlite3)
+    chroma_sqlite = CHROMA_DB_PATH / "chroma.sqlite3"
+    is_valid = CHROMA_DB_PATH.exists() and chroma_sqlite.exists() and chroma_sqlite.stat().st_size > 0
     
-    if not is_empty:
+    if is_valid:
         logger.info(f"✅ ChromaDB already exists at {CHROMA_DB_PATH}")
         return
     
-    logger.info("⚠️ ChromaDB not found locally - looking for pre-built database...")
+    # If directory exists but is invalid, remove it
+    if CHROMA_DB_PATH.exists():
+        logger.warning(f"⚠️ Found invalid/empty ChromaDB at {CHROMA_DB_PATH}, removing...")
+        shutil.rmtree(CHROMA_DB_PATH)
+    
+    logger.info("📦 ChromaDB not found - looking for pre-built database...")
     
     # Try to copy from pre-built ChromaDB in repository
     prebuilt_paths = [
@@ -349,8 +355,10 @@ def ensure_chromadb_synced():
                     dest = CHROMA_DB_PATH / item.name
                     if item.is_file():
                         shutil.copy2(item, dest)
+                        logger.info(f"   Copied file: {item.name}")
                     elif item.is_dir():
                         shutil.copytree(item, dest, dirs_exist_ok=True)
+                        logger.info(f"   Copied directory: {item.name}")
                 
                 logger.info("✅ Pre-built ChromaDB copied successfully!")
                 return
