@@ -120,7 +120,7 @@ def _render_system_status() -> None:
         
         # Simple status display
         st.markdown(f"{status_icon} **Vector DB:** {stats.get('status', 'Unknown')}")
-        st.caption(f"Mode: {stats.get('app_mode', 'unknown')} · {stats.get('llm_provider', 'n/a')}")
+        st.caption(f"Mode: {stats.get('app_mode', 'unknown')} · {stats.get('llm_model', 'n/a')}")
         
         # Metrics in compact layout
         col1, col2 = st.columns(2)
