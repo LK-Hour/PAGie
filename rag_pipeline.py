@@ -46,6 +46,12 @@ warnings.filterwarnings("ignore")
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # ---------------------------------------------------------------------------
+# Set up logging (MUST be before any logger usage)
+# ---------------------------------------------------------------------------
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
 # Load environment variables and validate required keys
 # ---------------------------------------------------------------------------
 if _dotenv_available:
@@ -113,12 +119,6 @@ else:
 
 CACHE_AUTO_SAVE_INTERVAL = 5  # Save every 5 new embeddings
 CACHE_VERSION = "v2.0"  # For cache invalidation
-
-# ---------------------------------------------------------------------------
-# Set up logging
-# ---------------------------------------------------------------------------
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Global model instances for performance (Singleton Pattern)
