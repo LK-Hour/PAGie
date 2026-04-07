@@ -66,7 +66,7 @@ except (ImportError, FileNotFoundError):
 
 # Configuration from environment (with sensible defaults)
 APP_MODE = os.getenv("APP_MODE", "dev").lower()  # dev|prod
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash-latest")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
 LOCAL_LLM_PROVIDER = os.getenv("LOCAL_LLM_PROVIDER", "ollama").lower()
 LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "qwen3.5:0.8b")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
