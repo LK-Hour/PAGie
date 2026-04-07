@@ -58,6 +58,9 @@ def initialize_app():
     # Sync ChromaDB from cloud on first run (for Streamlit Cloud deployment)
     ensure_chromadb_synced()
     
+    # SKIP cloud_sync EDA pipeline - use committed ChromaDB only
+    # ensure_cloud_sync_no_eda()  # NEW: Skip EDA, use committed ChromaDB only
+    
     # Initialize models (cached for performance)
     initialize_pagie()
 

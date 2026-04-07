@@ -361,6 +361,19 @@ def ensure_chromadb_synced():
                         logger.info(f"   Copied directory: {item.name}")
                 
                 logger.info("✅ Pre-built ChromaDB copied successfully!")
+                
+                # VERIFY the copy worked - check chunk count
+                try:
+                    from rag_pipeline import get_vectorstore
+                    vectorstore = get_vectorstore()
+                    if hasattr(vectorstore, '_collection'):
+                        count = vectorstore._collection.count()
+                        logger.info(f"🎯 VERIFIED: ChromaDB loaded with {count} chunks!")
+                    else:
+                        logger.info("✅ ChromaDB copied, verification skipped (no collection method)")
+                except Exception as e:
+                    logger.warning(f"⚠️ ChromaDB copied but verification failed: {str(e)}")
+                
                 return
             except Exception as e:
                 logger.error(f"❌ Failed to copy pre-built ChromaDB: {e}")
