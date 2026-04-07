@@ -351,10 +351,18 @@ def ensure_chromadb_synced():
                     dest = CHROMA_DB_PATH / item.name
                     if item.is_file():
                         shutil.copy2(item, dest)
-                        logger.info(f"   Copied file: {item.name}")
+                        # FIX: Make copied files writable (fix readonly database error)
+                        dest.chmod(0o666)
+                        logger.info(f"   Copied file: {item.name} (made writable)")
                     elif item.is_dir():
                         shutil.copytree(item, dest, dirs_exist_ok=True)
-                        logger.info(f"   Copied directory: {item.name}")
+                        # FIX: Make copied directory and all files writable  
+                        for root, dirs, files in os.walk(dest):
+                            for d in dirs:
+                                (Path(root) / d).chmod(0o777)
+                            for f in files:
+                                (Path(root) / f).chmod(0o666)
+                        logger.info(f"   Copied directory: {item.name} (made writable)")
                 
                 logger.info("✅ Pre-built ChromaDB copied successfully!")
                 
