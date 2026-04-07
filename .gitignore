@@ -40,8 +40,14 @@ build/
 *.docx
 *.txt
 
-# ChromaDB Vector Store (Persisted for Cloud)
-# # /chroma_db/
+# ChromaDB Vector Store
+# Local development ChromaDB (don't commit - changes frequently)
+chroma_db/
+
+# EXCEPTION: Pre-built ChromaDB for Streamlit Cloud deployment (DO commit this)
+!data/chromadb_prebuilt/
+!data/chromadb_prebuilt/chroma_db/
+
 /vector_store/
 
 # EDA Plots (generated artifacts)
@@ -73,4 +79,5 @@ service_account.json
 client_secret_*.json
 
 # Streamlit secrets (never commit!)
-.streamlit/secrets.toml
+.streamlit/secrets.toml# Backup archives
+chromadb_backup_*.tar.gz

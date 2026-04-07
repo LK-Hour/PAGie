@@ -314,12 +314,52 @@ def sync_chromadb_to_cloud(incremental: bool = True) -> bool:
 
 def ensure_chromadb_synced():
     """
-    Ensure ChromaDB is synced from cloud on first run.
-    Call this at app startup before initializing RAG pipeline.
+    Ensure ChromaDB is synced on first run.
+    
+    For Streamlit Cloud deployment:
+    - Uses pre-built ChromaDB from repository (data/chromadb_prebuilt/)
+    - Falls back to empty DB if not found (shows warning to user)
+    
+    For local development:
+    - Uses existing ./chroma_db directory
     """
-    if GCS_ENABLED and not CHROMA_DB_PATH.exists():
-        logger.info("ChromaDB not found locally - syncing from cloud...")
-        sync_chromadb_from_cloud()
+    # Check if ChromaDB is empty or doesn't exist
+    is_empty = not CHROMA_DB_PATH.exists() or not any(CHROMA_DB_PATH.iterdir())
+    
+    if not is_empty:
+        logger.info(f"✅ ChromaDB already exists at {CHROMA_DB_PATH}")
+        return
+    
+    logger.info("⚠️ ChromaDB not found locally - looking for pre-built database...")
+    
+    # Try to copy from pre-built ChromaDB in repository
+    prebuilt_paths = [
+        Path("./data/chromadb_prebuilt/chroma_db"),  # Preferred location
+        Path("./chroma_db_backup"),                  # Alternative location
+    ]
+    
+    for prebuilt_path in prebuilt_paths:
+        if prebuilt_path.exists() and any(prebuilt_path.iterdir()):
+            try:
+                logger.info(f"📦 Copying pre-built ChromaDB from {prebuilt_path}...")
+                CHROMA_DB_PATH.mkdir(parents=True, exist_ok=True)
+                
+                # Copy all files from pre-built to target
+                for item in prebuilt_path.iterdir():
+                    dest = CHROMA_DB_PATH / item.name
+                    if item.is_file():
+                        shutil.copy2(item, dest)
+                    elif item.is_dir():
+                        shutil.copytree(item, dest, dirs_exist_ok=True)
+                
+                logger.info("✅ Pre-built ChromaDB copied successfully!")
+                return
+            except Exception as e:
+                logger.error(f"❌ Failed to copy pre-built ChromaDB: {e}")
+    
+    # No pre-built database found
+    logger.warning("⚠️ No pre-built ChromaDB found - will start with EMPTY database")
+    logger.info("💡 To fix: Run './scripts/package_chromadb.sh' to prepare database for deployment")
 
 def auto_sync_after_update():
     """

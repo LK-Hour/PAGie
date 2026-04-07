@@ -72,20 +72,31 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM
 # FORCE_LOCAL_MODE=true forces local paths even when Streamlit is detected
 FORCE_LOCAL_MODE = os.getenv("FORCE_LOCAL_MODE", "false").lower() == "true"
 
+# Detect if we're running on Streamlit Cloud
+def _is_streamlit_cloud():
+    """Detect if running on Streamlit Cloud."""
+    return (
+        os.getenv("STREAMLIT_SHARING_MODE") == "true" or 
+        os.getenv("STREAMLIT_CLOUD") == "true" or
+        os.path.exists("/mount/src")  # Streamlit Cloud specific path
+    )
+
+IS_CLOUD_DEPLOYMENT = _is_streamlit_cloud() and not FORCE_LOCAL_MODE
+
 if FORCE_LOCAL_MODE:
     # Force local paths (for app_local.py)
     CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
+    ENVIRONMENT = "local (forced)"
+elif IS_CLOUD_DEPLOYMENT:
+    # On Streamlit Cloud, use /tmp (writable)
+    CHROMA_DB_PATH = "/tmp/chroma_db"
+    ENVIRONMENT = "cloud"
 else:
-    # Auto-detect environment
-    try:
-        import streamlit as st
-        if os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD") == "true":
-            # On Streamlit Cloud, use /tmp (writable)
-            CHROMA_DB_PATH = "/tmp/chroma_db"
-        else:
-            CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
-    except (ImportError, AttributeError):
-        CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
+    # Local development
+    CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
+    ENVIRONMENT = "local"
+
+logger.info(f"🌍 Environment: {ENVIRONMENT} | ChromaDB path: {CHROMA_DB_PATH}")
 
 RETRIEVAL_MULTIPLIER = int(os.getenv("RETRIEVAL_MULTIPLIER", "3"))  # Fetch k * multiplier candidates
 MAX_CANDIDATES = int(os.getenv("MAX_CANDIDATES", "30"))             # Upper limit for candidates
@@ -95,20 +106,10 @@ MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "5000"))     # Balanced c
 ENABLE_EMBEDDING_CACHE = True
 
 # Use writable cache directory on Streamlit Cloud
-# FORCE_LOCAL_MODE=true forces local paths even when Streamlit is detected
-if FORCE_LOCAL_MODE:
-    # Force local paths (for app_local.py)
-    EMBEDDING_CACHE_PATH = "./cache/embeddings_v2.pkl"
+if IS_CLOUD_DEPLOYMENT:
+    EMBEDDING_CACHE_PATH = "/tmp/cache/embeddings_v2.pkl"
 else:
-    # Auto-detect environment
-    try:
-        import streamlit as st
-        if os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD") == "true":
-            EMBEDDING_CACHE_PATH = "/tmp/cache/embeddings_v2.pkl"
-        else:
-            EMBEDDING_CACHE_PATH = "./cache/embeddings_v2.pkl"
-    except (ImportError, AttributeError):
-        EMBEDDING_CACHE_PATH = "./cache/embeddings_v2.pkl"
+    EMBEDDING_CACHE_PATH = "./cache/embeddings_v2.pkl"
 
 CACHE_AUTO_SAVE_INTERVAL = 5  # Save every 5 new embeddings
 CACHE_VERSION = "v2.0"  # For cache invalidation
@@ -151,12 +152,29 @@ def _get_vector_db():
     if _vector_db_instance is None:
         logger.info(f"Connecting to ChromaDB at {CHROMA_DB_PATH}")
         embedding_model = _get_embedding_model()
-        _vector_db_instance = Chroma(
-            persist_directory=CHROMA_DB_PATH,
-            embedding_function=embedding_model
-        )
-        chunk_count = _vector_db_instance._collection.count()
-        logger.info(f"Connected to ChromaDB with {chunk_count} chunks")
+        
+        try:
+            # Try to connect to existing ChromaDB
+            _vector_db_instance = Chroma(
+                persist_directory=CHROMA_DB_PATH,
+                embedding_function=embedding_model,
+                collection_name="pagie_cv_collection"  # Explicit collection name
+            )
+            chunk_count = _vector_db_instance._collection.count()
+            logger.info(f"Connected to ChromaDB with {chunk_count} chunks")
+        except Exception as e:
+            logger.warning(f"Failed to connect to existing ChromaDB: {e}")
+            logger.info("Creating new ChromaDB collection...")
+            
+            # Create new collection if it doesn't exist or has issues
+            _vector_db_instance = Chroma(
+                persist_directory=CHROMA_DB_PATH,
+                embedding_function=embedding_model,
+                collection_name="pagie_cv_collection"
+            )
+            chunk_count = _vector_db_instance._collection.count()
+            logger.info(f"Created new ChromaDB collection with {chunk_count} chunks")
+    
     return _vector_db_instance
 
 def _get_llm_model(provider: str = None):
@@ -609,6 +627,22 @@ def query_pagie(user_question: str, k: int = 8, chat_history: List[Dict[str, str
     try:
         start_time = time.time()
         logger.info(f"Processing query: {user_question}")
+        
+        # Check if ChromaDB has data
+        vector_db = _get_vector_db()
+        chunk_count = vector_db._collection.count()
+        
+        if chunk_count == 0:
+            logger.warning("ChromaDB is empty - no CV data indexed yet")
+            return {
+                "answer": "⚠️ **No CV Data Available**\n\nThe knowledge base is currently empty. "
+                         "This typically happens on first deployment to Streamlit Cloud.\n\n"
+                         "**To fix this:**\n"
+                         "1. Run the data sync process to ingest CV files from Google Drive\n"
+                         "2. Or upload the pre-built ChromaDB database to your cloud deployment\n\n"
+                         "Please contact the administrator to initialize the CV database.",
+                "sources": []
+            }
         
         # Step 1: Query intent classification
         intent = _classify_query_intent(user_question)
