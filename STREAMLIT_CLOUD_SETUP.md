@@ -23,8 +23,8 @@ Your CV files are already committed to the repository (`data/drive/` contains 3 
 APP_MODE = "prod"
 
 # --- Gemini Model ---
-# Use gemini-2.0-flash-exp for latest performance
-GEMINI_MODEL = "gemini-2.0-flash-exp"
+# Use gemini-2.5-flash for latest performance
+GEMINI_MODEL = "gemini-2.5-flash"
 
 # --- Google Gemini API Key ---
 GOOGLE_API_KEY = "AIzaSyAdHMc2Ta1SOnmEwsmgwJ7r1epgQRSKM9k"
