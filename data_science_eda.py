@@ -141,9 +141,10 @@ def clean_ocr_text(text: str) -> str:
     # Multiple spaces to single space
     text = re.sub(r'\s+', ' ', text)
     
-    # Fix common OCR mistakes
-    text = text.replace('|', 'I')  # Pipe to I
-    text = text.replace('0', 'O')  # Zero to O in names (context-dependent)
+    # Fix common OCR mistakes - REMOVED overly aggressive replacements
+    # The blanket '0' -> 'O' and '|' -> 'I' replacements were corrupting
+    # legitimate text like "UBRU GPA Scraper" and technical terms with numbers.
+    # OCR corrections should be context-aware, not global replacements.
     
     # Clean up line breaks and extra whitespace
     text = re.sub(r'\n\s*\n', '\n\n', text)  # Multiple newlines to double
