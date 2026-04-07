@@ -60,6 +60,9 @@ def initialize_app():
     ensure_chromadb_synced()
     st.success("✅ ChromaDB sync complete!")
     
+    # COMPLETELY SKIP cloud_sync to prevent EDA pipeline interference
+    # This eliminates the competing EDA pipeline that keeps overwriting our ChromaDB
+    
     # Initialize models ONLY after ChromaDB is guaranteed ready
     initialize_pagie()
 
