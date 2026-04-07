@@ -59,24 +59,29 @@ DATA_DIR = Path("./data")
 # FORCE_LOCAL_MODE=true forces local paths even when Streamlit is detected
 FORCE_LOCAL_MODE = os.getenv("FORCE_LOCAL_MODE", "false").lower() == "true"
 
+# Detect if we're running on Streamlit Cloud (same logic as rag_pipeline.py)
+def _is_streamlit_cloud():
+    """Detect if running on Streamlit Cloud."""
+    return (
+        os.getenv("STREAMLIT_SHARING_MODE") == "true" or 
+        os.getenv("STREAMLIT_CLOUD") == "true" or
+        os.path.exists("/mount/src")  # Streamlit Cloud specific path
+    )
+
+IS_CLOUD_DEPLOYMENT = _is_streamlit_cloud() and not FORCE_LOCAL_MODE
+
 if FORCE_LOCAL_MODE:
     # Force local paths (for app_local.py)
     ASSETS_DIR = Path("./assets")
     CHROMA_DB_DIR = "./chroma_db"
+elif IS_CLOUD_DEPLOYMENT:
+    # On Streamlit Cloud, use /tmp (writable) - SAME as rag_pipeline.py
+    ASSETS_DIR = Path("/tmp/assets")
+    CHROMA_DB_DIR = "/tmp/chroma_db"
 else:
-    # Auto-detect environment
-    try:
-        import streamlit as st
-        if os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD") == "true":
-            # On Streamlit Cloud, use /tmp (writable)
-            ASSETS_DIR = Path("/tmp/assets")
-            CHROMA_DB_DIR = "/tmp/chroma_db"
-        else:
-            ASSETS_DIR = Path("./assets")
-            CHROMA_DB_DIR = "./chroma_db"
-    except (ImportError, AttributeError):
-        ASSETS_DIR = Path("./assets")
-        CHROMA_DB_DIR = "./chroma_db"
+    # Local development
+    ASSETS_DIR = Path("./assets")
+    CHROMA_DB_DIR = "./chroma_db"
 
 # Optional ingestion hygiene controls (comma-separated globs / regex-lite substrings)
 EXCLUDE_SOURCE_PATTERNS = [p.strip().lower() for p in os.getenv("EXCLUDE_SOURCE_PATTERNS", "").split(",") if p.strip()]
