@@ -350,17 +350,38 @@ def ensure_chromadb_synced():
                 CHROMA_DB_PATH.chmod(0o777)
                 logger.info(f"   Made target directory writable: {CHROMA_DB_PATH}")
                 
-                # Copy all files from pre-built to target
+                # NEW APPROACH: Use SQLite backup to properly copy database
+                # This ensures the database is opened in a writable state
+                import sqlite3
+                source_db = prebuilt_path / "chroma.sqlite3"
+                target_db = CHROMA_DB_PATH / "chroma.sqlite3"
+                
+                if source_db.exists():
+                    logger.info(f"   Using SQLite backup to copy database...")
+                    # Open source as readonly, target as read-write
+                    src_conn = sqlite3.connect(f"file:{source_db}?mode=ro", uri=True)
+                    dst_conn = sqlite3.connect(str(target_db))
+                    
+                    # Use SQLite's backup API to clone the database
+                    src_conn.backup(dst_conn)
+                    src_conn.close()
+                    dst_conn.close()
+                    
+                    # Make the new database fully writable
+                    target_db.chmod(0o666)
+                    logger.info(f"   ✅ Database copied with SQLite backup (writable)")
+                else:
+                    # Fallback to regular file copy
+                    shutil.copy2(source_db, target_db)
+                    target_db.chmod(0o666)
+                    logger.info(f"   ✅ Database copied with file copy (writable)")
+                
+                # Copy directory structures (collection directories)
                 for item in prebuilt_path.iterdir():
-                    dest = CHROMA_DB_PATH / item.name
-                    if item.is_file():
-                        shutil.copy2(item, dest)
-                        # FIX: Make copied files writable (fix readonly database error)
-                        dest.chmod(0o666)
-                        logger.info(f"   Copied file: {item.name} (made writable)")
-                    elif item.is_dir():
+                    if item.is_dir():
+                        dest = CHROMA_DB_PATH / item.name
                         shutil.copytree(item, dest, dirs_exist_ok=True)
-                        # FIX: Make copied directory and all files writable  
+                        # Make copied directory and all files writable  
                         for root, dirs, files in os.walk(dest):
                             for d in dirs:
                                 (Path(root) / d).chmod(0o777)
