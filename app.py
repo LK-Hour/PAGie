@@ -55,13 +55,12 @@ def initialize_app():
     # Apply custom styling with modern theme
     apply_custom_styles(theme="modern")  # Options: modern, ocean, sunset, forest
     
-    # Sync ChromaDB from cloud on first run (for Streamlit Cloud deployment)
+    # CRITICAL: Sync ChromaDB FIRST before any model initialization
+    st.info("🔄 Syncing ChromaDB...")
     ensure_chromadb_synced()
+    st.success("✅ ChromaDB sync complete!")
     
-    # SKIP cloud_sync EDA pipeline - use committed ChromaDB only
-    # ensure_cloud_sync_no_eda()  # NEW: Skip EDA, use committed ChromaDB only
-    
-    # Initialize models (cached for performance)
+    # Initialize models ONLY after ChromaDB is guaranteed ready
     initialize_pagie()
 
 @st.cache_resource

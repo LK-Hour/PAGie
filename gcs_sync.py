@@ -330,6 +330,10 @@ def ensure_chromadb_synced():
     
     logger.info("📦 Forcing fresh ChromaDB copy from repository...")
     
+    # AGGRESSIVE LOGGING: Show what we're doing
+    logger.info(f"🔍 Current working directory: {os.getcwd()}")
+    logger.info(f"🔍 Target ChromaDB path: {CHROMA_DB_PATH}")
+    
     # Try to copy from pre-built ChromaDB in repository
     prebuilt_paths = [
         Path("./data/chromadb_prebuilt/chroma_db"),  # Preferred location
@@ -354,17 +358,25 @@ def ensure_chromadb_synced():
                 
                 logger.info("✅ Pre-built ChromaDB copied successfully!")
                 
-                # VERIFY the copy worked - check chunk count
-                try:
-                    from rag_pipeline import get_vectorstore
-                    vectorstore = get_vectorstore()
-                    if hasattr(vectorstore, '_collection'):
-                        count = vectorstore._collection.count()
-                        logger.info(f"🎯 VERIFIED: ChromaDB loaded with {count} chunks!")
-                    else:
-                        logger.info("✅ ChromaDB copied, verification skipped (no collection method)")
-                except Exception as e:
-                    logger.warning(f"⚠️ ChromaDB copied but verification failed: {str(e)}")
+                # IMMEDIATE VERIFICATION: Check if copy actually worked
+                copied_sqlite = CHROMA_DB_PATH / "chroma.sqlite3"
+                if copied_sqlite.exists():
+                    size = copied_sqlite.stat().st_size
+                    logger.info(f"🎯 VERIFIED: chroma.sqlite3 copied ({size} bytes)")
+                    
+                    # Test ChromaDB loading immediately
+                    try:
+                        import chromadb
+                        client = chromadb.PersistentClient(path=str(CHROMA_DB_PATH))
+                        collections = client.list_collections()
+                        logger.info(f"🎯 VERIFIED: {len(collections)} collection(s) found")
+                        if collections:
+                            count = collections[0].count()
+                            logger.info(f"🎯 VERIFIED: {count} documents in collection!")
+                    except Exception as e:
+                        logger.error(f"❌ VERIFICATION FAILED: {str(e)}")
+                else:
+                    logger.error(f"❌ COPY FAILED: chroma.sqlite3 not found after copy!")
                 
                 return
             except Exception as e:
