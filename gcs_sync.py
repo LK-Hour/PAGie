@@ -374,7 +374,32 @@ def ensure_chromadb_synced():
                 copied_sqlite = CHROMA_DB_PATH / "chroma.sqlite3"
                 if copied_sqlite.exists():
                     size = copied_sqlite.stat().st_size
-                    logger.info(f"🎯 VERIFIED: chroma.sqlite3 copied ({size} bytes)")
+                    perms = oct(copied_sqlite.stat().st_mode)
+                    logger.info(f"🎯 VERIFIED: chroma.sqlite3 copied ({size} bytes) permissions: {perms}")
+                    
+                    # AGGRESSIVE PERMISSION FIX: Try multiple permission strategies
+                    try:
+                        # Strategy 1: Make everything 777 (full permissions)
+                        copied_sqlite.chmod(0o777)
+                        CHROMA_DB_PATH.chmod(0o777)
+                        
+                        # Strategy 2: Make parent directory fully writable
+                        CHROMA_DB_PATH.parent.chmod(0o777)
+                        
+                        # Strategy 3: Set ownership if possible (may fail on some systems)
+                        import os
+                        try:
+                            os.chown(copied_sqlite, os.getuid(), os.getgid())
+                            os.chown(CHROMA_DB_PATH, os.getuid(), os.getgid())
+                            logger.info("🔧 FIXED: Set file ownership")
+                        except:
+                            logger.info("⚠️ Could not change ownership (normal on some systems)")
+                        
+                        final_perms = oct(copied_sqlite.stat().st_mode)
+                        logger.info(f"🔧 FIXED: Final permissions: {final_perms}")
+                        
+                    except Exception as perm_error:
+                        logger.error(f"❌ Permission fix failed: {perm_error}")
                     
                     # Test ChromaDB loading immediately
                     try:
