@@ -31,7 +31,7 @@ build/
 !data/drive/
 !data/drive/*.pdf
 
-/data/*
+# /data/*
 !/data/drive
 /notion_data/
 
@@ -40,14 +40,15 @@ build/
 *.docx
 *.txt
 
-# ChromaDB Vector Store (can be rebuilt)
-/chroma_db/
+# ChromaDB Vector Store (Persisted for Cloud)
+# # /chroma_db/
 /vector_store/
 
 # EDA Plots (generated artifacts)
-/plots/
+# /plots/
 /figures/
-*.png
+# *.png
+!assets/eda_report.png
 *.jpg
 *.jpeg
 
