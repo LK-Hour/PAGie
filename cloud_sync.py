@@ -77,14 +77,24 @@ def _sync_cloud() -> dict:
     Sync CV files on Streamlit Cloud.
     
     Strategy:
-    1. Try Google Drive Sync (if GOOGLE_DRIVE_TOKEN_JSON configured in secrets)
-    2. Try GCS bucket download (if configured)
-    3. Fall back to using pre-committed files in repository
+    1. Check for pre-committed files in repository (data/drive/)
+    2. Try Google Drive Sync (if GOOGLE_DRIVE_TOKEN_JSON configured in secrets)
+    3. Try GCS bucket download (if configured)
     """
     
+    # 1. First, check if CV files are already in the repository (pre-committed)
+    file_count = len(list(CV_DATA_DIR.glob("*.pdf")))
+    if file_count > 0:
+        logger.info(f"✅ Found {file_count} pre-committed CV files in repository")
+        return {
+            "success": True,
+            "message": f"✅ Using {file_count} pre-committed CV files from repository",
+            "file_count": file_count
+        }
+    
+    # 2. Try Google Drive sync if credentials are provided
     try:
         import streamlit as st
-        # 1. Try Google Drive sync first if credentials are provided
         if "GOOGLE_DRIVE_TOKEN_JSON" in getattr(st, 'secrets', {}):
             logger.info("Token found in secrets, attempting direct Google Drive sync...")
             return _sync_local()
@@ -92,7 +102,7 @@ def _sync_cloud() -> dict:
         logger.error(f"Google Drive sync on cloud failed: {e}")
         pass
         
-    # Try GCS sync if enabled
+    # 3. Try GCS sync if enabled
     try:
         import streamlit as st
         gcs_enabled = st.secrets.get("GCS_CV_SYNC_ENABLED", "false").lower() == "true"
@@ -102,7 +112,7 @@ def _sync_cloud() -> dict:
     except (ImportError, AttributeError, KeyError):
         pass
     
-    # No files available
+    # No files available anywhere
     return {
         "success": False,
         "message": (
