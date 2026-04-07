@@ -323,20 +323,12 @@ def ensure_chromadb_synced():
     For local development:
     - Uses existing ./chroma_db directory
     """
-    # Check if ChromaDB exists AND is valid (has chroma.sqlite3)
-    chroma_sqlite = CHROMA_DB_PATH / "chroma.sqlite3"
-    is_valid = CHROMA_DB_PATH.exists() and chroma_sqlite.exists() and chroma_sqlite.stat().st_size > 0
-    
-    if is_valid:
-        logger.info(f"✅ ChromaDB already exists at {CHROMA_DB_PATH}")
-        return
-    
-    # If directory exists but is invalid, remove it
+    # NUCLEAR OPTION: Force fresh copy every time to fix 0 chunks issue
     if CHROMA_DB_PATH.exists():
-        logger.warning(f"⚠️ Found invalid/empty ChromaDB at {CHROMA_DB_PATH}, removing...")
+        logger.info(f"🗑️ FORCE REFRESH: Removing existing ChromaDB at {CHROMA_DB_PATH}")
         shutil.rmtree(CHROMA_DB_PATH)
     
-    logger.info("📦 ChromaDB not found - looking for pre-built database...")
+    logger.info("📦 Forcing fresh ChromaDB copy from repository...")
     
     # Try to copy from pre-built ChromaDB in repository
     prebuilt_paths = [
