@@ -346,6 +346,10 @@ def ensure_chromadb_synced():
                 logger.info(f"📦 Copying pre-built ChromaDB from {prebuilt_path}...")
                 CHROMA_DB_PATH.mkdir(parents=True, exist_ok=True)
                 
+                # ADDITIONAL FIX: Make target directory fully writable first
+                CHROMA_DB_PATH.chmod(0o777)
+                logger.info(f"   Made target directory writable: {CHROMA_DB_PATH}")
+                
                 # Copy all files from pre-built to target
                 for item in prebuilt_path.iterdir():
                     dest = CHROMA_DB_PATH / item.name
