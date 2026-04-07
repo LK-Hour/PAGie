@@ -152,24 +152,23 @@ def get_google_drive_service():
         FileNotFoundError: If no client_secret_*.json file exists in the project root.
         RuntimeError: If running on Streamlit Cloud where sync is not available.
     """
-    # Check if running on Streamlit Cloud
-    force_local_mode = os.getenv("FORCE_LOCAL_MODE", "false").lower() == "true"
-    if not force_local_mode:
-        try:
-            import streamlit as st
-            if hasattr(st, 'secrets'):
-                # Running on Streamlit Cloud - sync not available
-                raise RuntimeError(
-                    "Google Drive sync is not available on Streamlit Cloud. "
-                    "For cloud deployment, pre-upload CV files to the repository or use GCS sync."
-                )
-        except (ImportError, AttributeError):
-            pass  # Not on Streamlit, continue with normal auth
-    
     creds = None
+    is_cloud = os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD") == "true"
 
-    # Attempt to load a previously saved OAuth token to avoid re-authentication.
-    if os.path.exists(TOKEN_FILE):
+    # 1. Try to load token from Streamlit Secrets (for Cloud deployment)
+    try:
+        import streamlit as st
+        import json
+        if "GOOGLE_DRIVE_TOKEN_JSON" in st.secrets:
+            logger.info("Loading Google Drive credentials from Streamlit Secrets...")
+            token_dict = json.loads(st.secrets["GOOGLE_DRIVE_TOKEN_JSON"])
+            creds = Credentials.from_authorized_user_info(token_dict, SCOPES)
+    except (ImportError, KeyError, json.JSONDecodeError, Exception) as e:
+        logger.debug(f"Could not load token from secrets (expected locally): {e}")
+
+    # 2. If no secrets token, fall back to local token.json
+    if not creds and os.path.exists(TOKEN_FILE):
+        logger.info(f"Loading local credentials from {TOKEN_FILE}...")
         creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
 
     # If there's no valid token, initiate the OAuth flow.
@@ -179,6 +178,11 @@ def get_google_drive_service():
             logger.info("Refreshing expired Google OAuth token...")
             creds.refresh(Request())
         else:
+            if is_cloud:
+                raise EnvironmentError(
+                    "Cannot open browser for Google Drive authentication on Streamlit Cloud. "
+                    "Please add your token.json contents to GOOGLE_DRIVE_TOKEN_JSON in your Streamlit secrets."
+                )
             # First-time auth — find the client secret file automatically.
             secret_files = glob.glob("client_secret_*.json")
             if not secret_files:
@@ -189,9 +193,10 @@ def get_google_drive_service():
             # Opens a browser window for the user to log in and grant permission.
             creds = flow.run_local_server(port=0)
 
-        # Persist the token so we don't need to re-authenticate next run.
-        with open(TOKEN_FILE, "w") as token_file:
-            token_file.write(creds.to_json())
+        # Persist the token so we don't need to re-authenticate next run (skip on cloud)
+        if not is_cloud:
+            with open(TOKEN_FILE, "w") as token_file:
+                token_file.write(creds.to_json())
         logger.info("Google OAuth token saved to token.json.")
 
     return build("drive", "v3", credentials=creds)

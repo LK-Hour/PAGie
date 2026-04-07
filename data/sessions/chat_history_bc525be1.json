@@ -1,0 +1,16 @@
+{
+  "session_id": "bc525be1",
+  "last_updated": "2026-04-05T15:02:40.397936",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello",
+      "sources": []
+    },
+    {
+      "role": "assistant",
+      "content": "Hi there!",
+      "sources": []
+    }
+  ]
+}

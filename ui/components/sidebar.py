@@ -148,7 +148,14 @@ def _render_sync_status() -> None:
         with open(last_sync_path, "r") as f:
             raw_ts = f.read().strip()
         try:
+            from zoneinfo import ZoneInfo
+            from datetime import timezone
             dt = datetime.fromisoformat(raw_ts)
+            # If the timestamp is naive (no timezone info), assume it's UTC from Streamlit Cloud
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            # Convert to Cambodia time (GMT+7)
+            dt = dt.astimezone(ZoneInfo("Asia/Phnom_Penh"))
             sync_text = dt.strftime("%b %d, %H:%M")
         except ValueError:
             sync_text = raw_ts[:16]
@@ -160,6 +167,15 @@ def _render_sync_status() -> None:
 def _render_action_buttons() -> None:
     """Render action buttons section."""
     st.markdown("#### :material/settings: Actions")
+
+    is_cloud = bool(st.secrets.get("STREAMLIT_SHARING_MODE", ""))
+    gcs_enabled = st.secrets.get("GCS_ENABLED", "false").lower() == "true"
+
+    if is_cloud and not gcs_enabled:
+        st.caption(
+            "Cloud note: Rebuild KB updates this running session only. "
+            "For permanent updates, rebuild locally and push `chroma_db/` + `assets/eda_report.png` to GitHub."
+        )
 
     # Sync CV Files button (cloud-aware)
     if st.button(":material/sync: Sync Files", 
@@ -221,8 +237,11 @@ def _render_eda_report() -> None:
         )
         # Show when the EDA was last generated (compact)
         import os
+        from zoneinfo import ZoneInfo
         mtime = os.path.getmtime(eda_path)
-        st.caption(f"Generated: {datetime.fromtimestamp(mtime).strftime('%b %d, %H:%M')}")
+        # Convert timestamp to Cambodia time (GMT+7)
+        dt = datetime.fromtimestamp(mtime, tz=ZoneInfo("Asia/Phnom_Penh"))
+        st.caption(f"Generated: {dt.strftime('%b %d, %H:%M')}")
     else:
         st.info("No EDA report. Rebuild KB to generate.")
 
