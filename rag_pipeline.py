@@ -151,6 +151,24 @@ def _get_vector_db():
     global _vector_db_instance
     if _vector_db_instance is None:
         logger.info(f"Connecting to ChromaDB at {CHROMA_DB_PATH}")
+        
+        # AGGRESSIVE DEBUG: Check if ChromaDB path exists and what's in it
+        import os
+        from pathlib import Path
+        chroma_path = Path(CHROMA_DB_PATH)
+        logger.info(f"🔍 DEBUG: ChromaDB path exists? {chroma_path.exists()}")
+        if chroma_path.exists():
+            files = list(chroma_path.iterdir())
+            logger.info(f"🔍 DEBUG: Files in ChromaDB: {[f.name for f in files]}")
+            sqlite_file = chroma_path / "chroma.sqlite3"
+            if sqlite_file.exists():
+                size = sqlite_file.stat().st_size
+                logger.info(f"🔍 DEBUG: chroma.sqlite3 size: {size} bytes")
+            else:
+                logger.error(f"🔍 DEBUG: chroma.sqlite3 MISSING!")
+        else:
+            logger.error(f"🔍 DEBUG: ChromaDB path {CHROMA_DB_PATH} does NOT exist!")
+        
         embedding_model = _get_embedding_model()
         
         try:
