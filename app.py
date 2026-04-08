@@ -55,15 +55,10 @@ def initialize_app():
     # Apply custom styling with modern theme
     apply_custom_styles(theme="modern")  # Options: modern, ocean, sunset, forest
     
-    # CRITICAL: Sync ChromaDB FIRST before any model initialization
-    st.info("🔄 Syncing ChromaDB...")
+    # Ensure ChromaDB is synced before initialization
     ensure_chromadb_synced()
-    st.success("✅ ChromaDB sync complete!")
     
-    # COMPLETELY SKIP cloud_sync to prevent EDA pipeline interference
-    # This eliminates the competing EDA pipeline that keeps overwriting our ChromaDB
-    
-    # Initialize models ONLY after ChromaDB is guaranteed ready
+    # Initialize models after ChromaDB is ready
     initialize_pagie()
 
 @st.cache_resource

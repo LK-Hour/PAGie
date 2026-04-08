@@ -323,16 +323,10 @@ def ensure_chromadb_synced():
     For local development:
     - Uses existing ./chroma_db directory
     """
-    # NUCLEAR OPTION: Force fresh copy every time to fix 0 chunks issue
+    # Refresh ChromaDB if it already exists
     if CHROMA_DB_PATH.exists():
-        logger.info(f"🗑️ FORCE REFRESH: Removing existing ChromaDB at {CHROMA_DB_PATH}")
+        logger.debug(f"Removing existing ChromaDB at {CHROMA_DB_PATH}")
         shutil.rmtree(CHROMA_DB_PATH)
-    
-    logger.info("📦 Forcing fresh ChromaDB copy from repository...")
-    
-    # AGGRESSIVE LOGGING: Show what we're doing
-    logger.info(f"🔍 Current working directory: {os.getcwd()}")
-    logger.info(f"🔍 Target ChromaDB path: {CHROMA_DB_PATH}")
     
     # Try to copy from pre-built ChromaDB in repository
     prebuilt_paths = [
@@ -343,38 +337,27 @@ def ensure_chromadb_synced():
     for prebuilt_path in prebuilt_paths:
         if prebuilt_path.exists() and any(prebuilt_path.iterdir()):
             try:
-                logger.info(f"📦 Copying pre-built ChromaDB from {prebuilt_path}...")
+                logger.debug(f"Copying ChromaDB from {prebuilt_path}")
                 CHROMA_DB_PATH.mkdir(parents=True, exist_ok=True)
-                
-                # ADDITIONAL FIX: Make target directory fully writable first
                 CHROMA_DB_PATH.chmod(0o777)
-                logger.info(f"   Made target directory writable: {CHROMA_DB_PATH}")
                 
-                # NEW APPROACH: Use SQLite backup to properly copy database
-                # This ensures the database is opened in a writable state
+                # Use SQLite backup to properly copy database
                 import sqlite3
                 source_db = prebuilt_path / "chroma.sqlite3"
                 target_db = CHROMA_DB_PATH / "chroma.sqlite3"
                 
                 if source_db.exists():
-                    logger.info(f"   Using SQLite backup to copy database...")
                     # Open source as readonly, target as read-write
                     src_conn = sqlite3.connect(f"file:{source_db}?mode=ro", uri=True)
                     dst_conn = sqlite3.connect(str(target_db))
-                    
-                    # Use SQLite's backup API to clone the database
                     src_conn.backup(dst_conn)
                     src_conn.close()
                     dst_conn.close()
-                    
-                    # Make the new database fully writable
                     target_db.chmod(0o666)
-                    logger.info(f"   ✅ Database copied with SQLite backup (writable)")
                 else:
                     # Fallback to regular file copy
                     shutil.copy2(source_db, target_db)
                     target_db.chmod(0o666)
-                    logger.info(f"   ✅ Database copied with file copy (writable)")
                 
                 # Copy directory structures (collection directories)
                 for item in prebuilt_path.iterdir():
@@ -387,62 +370,45 @@ def ensure_chromadb_synced():
                                 (Path(root) / d).chmod(0o777)
                             for f in files:
                                 (Path(root) / f).chmod(0o666)
-                        logger.info(f"   Copied directory: {item.name} (made writable)")
                 
-                logger.info("✅ Pre-built ChromaDB copied successfully!")
-                
-                # IMMEDIATE VERIFICATION: Check if copy actually worked
+                # Verify the copy worked
                 copied_sqlite = CHROMA_DB_PATH / "chroma.sqlite3"
                 if copied_sqlite.exists():
-                    size = copied_sqlite.stat().st_size
-                    perms = oct(copied_sqlite.stat().st_mode)
-                    logger.info(f"🎯 VERIFIED: chroma.sqlite3 copied ({size} bytes) permissions: {perms}")
-                    
-                    # AGGRESSIVE PERMISSION FIX: Try multiple permission strategies
+                    # Set final permissions
                     try:
-                        # Strategy 1: Make everything 777 (full permissions)
                         copied_sqlite.chmod(0o777)
                         CHROMA_DB_PATH.chmod(0o777)
-                        
-                        # Strategy 2: Make parent directory fully writable
                         CHROMA_DB_PATH.parent.chmod(0o777)
                         
-                        # Strategy 3: Set ownership if possible (may fail on some systems)
-                        # Note: os is already imported at the top of the file
+                        # Set ownership if possible
                         try:
                             os.chown(copied_sqlite, os.getuid(), os.getgid())
                             os.chown(CHROMA_DB_PATH, os.getuid(), os.getgid())
-                            logger.info("🔧 FIXED: Set file ownership")
                         except:
-                            logger.info("⚠️ Could not change ownership (normal on some systems)")
-                        
-                        final_perms = oct(copied_sqlite.stat().st_mode)
-                        logger.info(f"🔧 FIXED: Final permissions: {final_perms}")
-                        
-                    except Exception as perm_error:
-                        logger.error(f"❌ Permission fix failed: {perm_error}")
+                            pass  # Ownership changes may fail on some systems
+                    except Exception:
+                        pass  # Permission changes may fail, but that's okay
                     
-                    # Test ChromaDB loading immediately
+                    # Verify ChromaDB loads correctly
                     try:
                         import chromadb
                         client = chromadb.PersistentClient(path=str(CHROMA_DB_PATH))
                         collections = client.list_collections()
-                        logger.info(f"🎯 VERIFIED: {len(collections)} collection(s) found")
                         if collections:
                             count = collections[0].count()
-                            logger.info(f"🎯 VERIFIED: {count} documents in collection!")
+                            logger.info(f"ChromaDB ready with {count} documents")
                     except Exception as e:
-                        logger.error(f"❌ VERIFICATION FAILED: {str(e)}")
+                        logger.warning(f"ChromaDB verification failed: {e}")
                 else:
-                    logger.error(f"❌ COPY FAILED: chroma.sqlite3 not found after copy!")
+                    logger.error("ChromaDB copy failed - database file not found")
                 
                 return
             except Exception as e:
-                logger.error(f"❌ Failed to copy pre-built ChromaDB: {e}")
+                logger.error(f"Failed to copy ChromaDB: {e}")
     
     # No pre-built database found
-    logger.warning("⚠️ No pre-built ChromaDB found - will start with EMPTY database")
-    logger.info("💡 To fix: Run './scripts/package_chromadb.sh' to prepare database for deployment")
+    logger.warning("No pre-built ChromaDB found - starting with empty database")
+    logger.info("To add data: Run './scripts/package_chromadb.sh' to prepare database")
 
 def auto_sync_after_update():
     """
