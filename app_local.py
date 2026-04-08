@@ -28,15 +28,17 @@ from dotenv import load_dotenv
 # Import modular UI components
 from ui import (
     init_page_config,
-    apply_custom_styles,
-    render_chat_interface
+    apply_custom_styles
 )
+
+# Import local chat interface (uses rag_pipeline_local)
+from ui.components.chat_interface_local import render_chat_interface
 
 # Import local sidebar (without cloud logic)
 from ui.components.sidebar_local import render_sidebar_local
 
 # Import backend functionality
-from rag_pipeline import warmup_models
+from rag_pipeline_local import warmup_models
 import streamlit as st
 
 # Load environment variables
@@ -49,7 +51,7 @@ print("\n" + "="*70)
 print("🏠 PAGie Local Mode - Path Configuration")
 print("="*70)
 
-from rag_pipeline import CHROMA_DB_PATH, EMBEDDING_CACHE_PATH
+from rag_pipeline_local import CHROMA_DB_PATH, EMBEDDING_CACHE_PATH
 from data_science_eda import CHROMA_DB_DIR, ASSETS_DIR
 
 print(f"FORCE_LOCAL_MODE:     {os.environ.get('FORCE_LOCAL_MODE', 'NOT SET')}")

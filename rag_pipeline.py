@@ -172,11 +172,10 @@ def _get_vector_db():
         embedding_model = _get_embedding_model()
         
         try:
-            # Try to connect to existing ChromaDB
+            # Try to connect to existing ChromaDB (use default "langchain" collection name)
             _vector_db_instance = Chroma(
                 persist_directory=CHROMA_DB_PATH,
-                embedding_function=embedding_model,
-                collection_name="pagie_cv_collection"  # Explicit collection name
+                embedding_function=embedding_model
             )
             chunk_count = _vector_db_instance._collection.count()
             logger.info(f"Connected to ChromaDB with {chunk_count} chunks")
@@ -187,8 +186,7 @@ def _get_vector_db():
             # Create new collection if it doesn't exist or has issues
             _vector_db_instance = Chroma(
                 persist_directory=CHROMA_DB_PATH,
-                embedding_function=embedding_model,
-                collection_name="pagie_cv_collection"
+                embedding_function=embedding_model
             )
             chunk_count = _vector_db_instance._collection.count()
             logger.info(f"Created new ChromaDB collection with {chunk_count} chunks")

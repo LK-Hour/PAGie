@@ -96,7 +96,7 @@ def _render_system_status() -> None:
     
     try:
         # Import here to avoid circular imports
-        from rag_pipeline import get_cache_stats, get_db_stats
+        from rag_pipeline_local import get_cache_stats, get_db_stats
         
         stats = get_db_stats()
         is_connected = "Connected" in stats.get("status", "")
@@ -151,7 +151,7 @@ def _render_action_buttons() -> None:
                  help="Sync CV files from Google Drive (OAuth)"):
         with st.spinner("Syncing from Google Drive..."):
             try:
-                from sync_data import run_sync
+                from sync_data_local import run_sync
                 run_sync()
                 
                 # Count synced files
@@ -170,11 +170,11 @@ def _render_action_buttons() -> None:
         with st.spinner("Processing CVs and building ChromaDB..."):
             try:
                 from data_science_eda import run_pipeline
-                import rag_pipeline
+                import rag_pipeline_local
                 
                 # First explicitly free the Database connection 
                 # so data_science_eda.py can safely delete and recreate it.
-                rag_pipeline._vector_db_instance = None
+                rag_pipeline_local._vector_db_instance = None
                 
                 df, _ = run_pipeline()
                 if df is not None:

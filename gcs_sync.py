@@ -408,7 +408,7 @@ def ensure_chromadb_synced():
                         CHROMA_DB_PATH.parent.chmod(0o777)
                         
                         # Strategy 3: Set ownership if possible (may fail on some systems)
-                        import os
+                        # Note: os is already imported at the top of the file
                         try:
                             os.chown(copied_sqlite, os.getuid(), os.getgid())
                             os.chown(CHROMA_DB_PATH, os.getuid(), os.getgid())
